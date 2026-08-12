@@ -1,0 +1,4 @@
+numpy>=2.0
+pillow-heif>=1.5.0
+OpenEXR>=3.4.4
+
