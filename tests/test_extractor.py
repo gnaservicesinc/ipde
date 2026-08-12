@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import tempfile
 import unittest
@@ -9,8 +10,16 @@ from unittest.mock import patch
 
 import numpy as np
 
-from ipde.extractor import ExtractOptions, ExtractionError, extract_file, inspect_file, semantic_name
-from ipde.formats import read_npy_exact, read_png_exact
+from ipde.extractor import (
+    ExtractOptions,
+    ExtractionError,
+    MetricDepthError,
+    extract_file,
+    inspect_file,
+    reconstruct_metric_depth,
+    semantic_name,
+)
+from ipde.formats import arrays_bit_equal, read_exr_exact, read_npy_exact, read_png_exact
 from ipde.libheif_aux import DecodedAuxiliary
 
 
@@ -107,6 +116,75 @@ def fixture_file() -> FakeFile:
 
 
 class ExtractorTests(unittest.TestCase):
+    def test_metric_depth_reconstruction_uses_exact_float32_operation_order(self) -> None:
+        raw = np.array([[0, 1, 127, 255], [254, 128, 64, 32]], dtype=np.uint8)
+        metadata = {"d_min": 1.5, "d_max": 4.5, "representation_type": 1}
+
+        actual = reconstruct_metric_depth(raw, metadata)
+        normalized = raw.astype(np.float32) / np.float32(255.0)
+        disparity = normalized * (np.float32(4.5) - np.float32(1.5)) + np.float32(1.5)
+        expected = np.float32(1.0) / disparity
+
+        self.assertEqual(actual.dtype, np.dtype("float32"))
+        self.assertTrue(actual.flags.c_contiguous)
+        self.assertTrue(arrays_bit_equal(actual, expected))
+        self.assertEqual(actual[0, 0], np.float32(1.0) / np.float32(1.5))
+        self.assertEqual(actual[0, 3], np.float32(1.0) / np.float32(4.5))
+
+    def test_metric_depth_reconstruction_rejects_mislabelled_inputs(self) -> None:
+        raw = np.array([[0, 255]], dtype=np.uint8)
+        with self.assertRaisesRegex(MetricDepthError, "uniform_disparity"):
+            reconstruct_metric_depth(
+                raw,
+                {"d_min": 1.0, "d_max": 3.0, "representation_type": 2},
+            )
+        with self.assertRaisesRegex(MetricDepthError, "uint8"):
+            reconstruct_metric_depth(
+                raw.astype(np.uint16),
+                {"d_min": 1.0, "d_max": 3.0, "representation_type": 1},
+            )
+        with self.assertRaisesRegex(MetricDepthError, "d_min and d_max"):
+            reconstruct_metric_depth(raw, {"representation_type": 1})
+
+    @unittest.skipUnless(importlib.util.find_spec("OpenEXR"), "OpenEXR is not installed")
+    def test_metric_depth_is_exported_as_verified_float32_exr(self) -> None:
+        raw = np.array([[0, 1, 127, 255], [5, 25, 125, 250]], dtype=np.uint8)
+        metadata = {"d_min": 1.5, "d_max": 4.5, "representation_type": 1}
+        depth = FakeImage(raw, "L", 8, info={"metadata": metadata})
+        parent = FakeParent(
+            np.zeros((2, 4, 3), dtype=np.uint8),
+            "RGB",
+            8,
+            info={
+                "primary": True,
+                "bit_depth": 8,
+                "depth_images": [depth],
+                "aux": {},
+                "thumbnails": [],
+            },
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "metric.heic"
+            source.write_bytes(b"fake-heif")
+            with patch("ipde.extractor.pillow_heif.open_heif", return_value=FakeFile([parent])):
+                report = extract_file(source, ExtractOptions(write_npy=False))
+
+            exr_path = Path(directory) / "metric_depth_meters.exr"
+            self.assertTrue(exr_path.is_file())
+            expected = reconstruct_metric_depth(raw, metadata)
+            self.assertTrue(arrays_bit_equal(read_exr_exact(exr_path, raw.shape), expected))
+
+            output = next(
+                item
+                for item in report["assets"][0]["outputs"]
+                if item["role"] == "derived_metric_depth"
+            )
+            self.assertTrue(output["verified"])
+            self.assertEqual(output["derivation"]["output_dtype"], "float32")
+            self.assertEqual(output["derivation"]["depth_units"], "m")
+            self.assertEqual(output["derivation"]["d_min"], 1.5)
+            self.assertEqual(output["derivation"]["d_max"], 4.5)
+
     def test_semantic_urn_names(self) -> None:
         self.assertEqual(semantic_name("urn:com:apple:photo:2020:aux:hdrgainmap"), "hdr_gain_map")
         self.assertEqual(semantic_name("urn:test:PortraitMatte"), "portrait_matte")
@@ -199,6 +277,8 @@ class ExtractorTests(unittest.TestCase):
             self.assertEqual(loaded["asset_count"], 2)
             self.assertEqual(Path(report["manifest_path"]), manifest.resolve())
             self.assertTrue(all(output["verified"] for asset in loaded["assets"] for output in asset["outputs"]))
+            self.assertFalse((output / "photo.edit_depth_meters.exr").exists())
+            self.assertTrue(any("requires uint8" in warning for warning in loaded["warnings"]))
 
     def test_collision_refuses_before_replacing_any_output(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

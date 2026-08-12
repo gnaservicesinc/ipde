@@ -9,8 +9,10 @@ parts:
 
 ## Precision model
 
-IPDE preserves the values produced by the HEIF decoder. It does not apply gamma
-correction, tone mapping, color enhancement, range stretching, or normalization.
+IPDE preserves the values produced by the HEIF decoder. Raw outputs never receive
+gamma correction, tone mapping, color enhancement, range stretching, or
+normalization. A separately named metric-depth EXR is an explicit, documented
+post-process and never replaces the raw depth PNG/NPY.
 
 There is an important distinction between *decoded-sample preservation* and the
 original scene:
@@ -18,7 +20,7 @@ original scene:
 - HEVC auxiliary images may have been encoded lossily by the camera. No decoder
   can reconstruct information that the original encoding discarded.
 - A depth plane may store uniform depth, inverse depth, disparity, or a nonlinear
-  representation. The numeric plane alone is not necessarily distance in metres.
+  representation. The numeric plane alone is not necessarily distance in meters.
   IPDE preserves the depth-representation metadata in the JSON manifest.
 - `pillow-heif` can expand 10/12-bit codes into a 16-bit display range. IPDE
   explicitly disables that behavior with `hdr_to_16bit=False`; a decoded 12-bit
@@ -35,6 +37,24 @@ Every extractable plane gets two outputs by default:
    losslessly compressed OpenEXR for `float16`/`float32` planes.
 2. A NumPy `.npy` file containing the exact dtype, shape, byte order, and decoded
    sample bits.
+
+An 8-bit, single-channel depth plane whose metadata declares
+`uniform_disparity` and supplies valid `d_min`/`d_max` bounds also gets a verified
+32-bit float `<name>_depth_meters.exr`. The vectorized reconstruction is performed
+entirely in `float32`, in this exact order:
+
+```text
+normalized = float32(raw) / float32(255.0)
+disparity = normalized * (float32(d_max) - float32(d_min)) + float32(d_min)
+depth_meters = float32(1.0) / disparity
+```
+
+Disparity is interpreted as `1/m`, so its reciprocal is depth in meters. Other
+source dtypes, missing/invalid bounds, and non-uniform-disparity representations
+are not guessed: their raw outputs are retained and the manifest reports why the
+metric EXR was skipped. The derived EXR carries unit/transform attributes, and
+its formula, bounds, range, nonfinite count, and decoded-array hash are recorded
+in the manifest.
 
 A `<source>_aux_manifest.json` records source/output SHA-256 hashes, dimensions,
 dtype, source bit depth, decoder settings, depth semantics, auxiliary URNs, and
@@ -89,6 +109,7 @@ Useful options:
 --json          Emit one machine-readable JSON object per input file
 --overwrite     Atomically replace colliding output files
 --no-npy        Omit exact-array companions (PNG/EXR remain verified and lossless)
+--no-metric-depth  Omit float32 meter reconstruction for eligible depth planes
 ```
 
 The process returns nonzero if any input fails. In JSON mode, errors are emitted
@@ -105,7 +126,8 @@ make gui
 Files may be added with the picker or drag-and-drop. IPDE inventories them first,
 showing every depth, auxiliary, and alpha plane with its dimensions, dtype, and
 source bit depth. Extraction runs one source at a time to keep peak memory use
-bounded. The output folder may be left blank to write beside each source.
+bounded. Metric-depth EXR reconstruction is enabled by default and can be toggled
+independently. The output folder may be left blank to write beside each source.
 
 Build without launching:
 
@@ -125,7 +147,8 @@ make smoke
 
 The test suite covers exact 8/16-bit PNG round trips, exact NPY round trips,
 floating-point EXR round trips when OpenEXR is installed, metadata preservation,
-collision refusal, auxiliary enumeration, and CLI behavior.
+collision refusal, auxiliary enumeration, exact float32 metric-depth operation
+ordering, representation validation, and CLI behavior.
 
 ## Output naming
 
@@ -134,6 +157,7 @@ For a typical Apple portrait named `IMG_0001.HEIC`, outputs look like:
 ```text
 IMG_0001_depth.png
 IMG_0001_depth.npy
+IMG_0001_depth_meters.exr
 IMG_0001_hdr_gain_map.png
 IMG_0001_hdr_gain_map.npy
 IMG_0001_hdr_gain_map_metadata0.xmp

@@ -9,6 +9,7 @@ import math
 import os
 import re
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from importlib.metadata import PackageNotFoundError, version
@@ -49,6 +50,7 @@ class ExtractionError(RuntimeError):
 class ExtractOptions:
     output_dir: Path | None = None
     write_npy: bool = True
+    write_metric_depth: bool = True
     overwrite: bool = False
 
 
@@ -86,7 +88,60 @@ class PendingOutput:
     asset_index: int | None
     write: Callable[[Path], None]
     verify: Callable[[Path], None]
+    details: dict[str, Any] = field(default_factory=dict)
     temporary_path: Path | None = None
+
+
+class MetricDepthError(ValueError):
+    """Raised when a depth plane cannot be reconstructed as physical meters."""
+
+
+def reconstruct_metric_depth(raw_depth: np.ndarray, metadata: Mapping[str, Any]) -> np.ndarray:
+    """Convert an 8-bit uniform-disparity plane to float32 physical depth in meters.
+
+    The operations and their order intentionally mirror the HEIF depth metadata
+    mapping. Every operation is vectorized and explicitly performed in float32.
+    """
+    raw = np.asarray(raw_depth)
+    if raw.dtype != np.dtype("uint8"):
+        raise MetricDepthError(f"metric reconstruction requires uint8 source samples, not {raw.dtype}")
+    if raw.ndim != 2 or raw.size == 0:
+        raise MetricDepthError(f"metric reconstruction requires a nonempty single-channel HxW plane, not {raw.shape}")
+
+    representation = metadata.get("representation_type")
+    try:
+        representation_value = int(representation)
+    except (TypeError, ValueError) as exc:
+        raise MetricDepthError("depth metadata has no valid representation_type") from exc
+    if representation_value != 1:
+        name = DEPTH_REPRESENTATIONS.get(representation_value, "unknown")
+        raise MetricDepthError(
+            f"the requested reciprocal mapping is valid only for uniform_disparity (1), not {name} ({representation_value})"
+        )
+
+    try:
+        d_min_value = float(metadata["d_min"])
+        d_max_value = float(metadata["d_max"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise MetricDepthError("uniform-disparity metadata requires numeric d_min and d_max") from exc
+    if not math.isfinite(d_min_value) or not math.isfinite(d_max_value):
+        raise MetricDepthError("d_min and d_max must be finite")
+    if d_min_value < 0.0 or d_max_value <= 0.0 or d_max_value < d_min_value:
+        raise MetricDepthError(
+            f"invalid physical disparity bounds d_min={d_min_value!r}, d_max={d_max_value!r}"
+        )
+
+    d_min = np.float32(d_min_value)
+    d_max = np.float32(d_max_value)
+    if not np.isfinite(d_min) or not np.isfinite(d_max):
+        raise MetricDepthError("d_min or d_max cannot be represented as finite float32")
+
+    float_samples = raw.astype(np.float32)
+    normalized = float_samples / np.float32(255.0)
+    disparity = normalized * (d_max - d_min) + d_min
+    with np.errstate(divide="ignore", invalid="ignore"):
+        depth_meters = np.float32(1.0) / disparity
+    return np.ascontiguousarray(depth_meters, dtype=np.float32)
 
 
 def _version_tuple(text: str) -> tuple[int, ...]:
@@ -460,6 +515,55 @@ def _exchange_output(path_base: Path, asset: Asset, asset_index: int) -> Pending
     )
 
 
+def _metric_depth_output(path_base: Path, asset: Asset, asset_index: int) -> PendingOutput:
+    depth_meters = reconstruct_metric_depth(asset.array, asset.metadata)
+    finite = np.isfinite(depth_meters)
+    if finite.any():
+        minimum: int | float | str = _stat_value(depth_meters[finite].min())
+        maximum: int | float | str = _stat_value(depth_meters[finite].max())
+    else:
+        minimum = maximum = "NaN"
+    d_min = float(asset.metadata["d_min"])
+    d_max = float(asset.metadata["d_max"])
+    path = Path(f"{path_base}_meters.exr")
+    derivation = {
+        "name": "uniform_disparity_to_metric_depth",
+        "source_dtype": asset.array.dtype.name,
+        "output_dtype": depth_meters.dtype.name,
+        "normalization_divisor": 255.0,
+        "d_min": d_min,
+        "d_max": d_max,
+        "disparity_units": "1/m",
+        "depth_units": "m",
+        "formula": (
+            "normalized = float32(raw) / float32(255.0); "
+            "disparity = normalized * (float32(d_max) - float32(d_min)) + float32(d_min); "
+            "depth_meters = float32(1.0) / disparity"
+        ),
+        "shape": list(depth_meters.shape),
+        "minimum_finite_meters": minimum,
+        "maximum_finite_meters": maximum,
+        "nonfinite_count": int(depth_meters.size - np.count_nonzero(finite)),
+        "derived_data_sha256": sha256_array(depth_meters),
+    }
+    return PendingOutput(
+        final_path=path,
+        role="derived_metric_depth",
+        asset_index=asset_index,
+        write=lambda temp, a=depth_meters: write_exr(
+            temp,
+            a,
+            storage_description="Derived float32 physical depth; each Y sample is distance in meters",
+            attributes={
+                "ipdeUnits": "meters",
+                "ipdeTransform": "depth=1/(raw/255*(d_max-d_min)+d_min)",
+            },
+        ),
+        verify=lambda temp, a=depth_meters: verify_exr(temp, a),
+        details={"derivation": derivation},
+    )
+
+
 def _build_manifest(discovery: Discovery, asset_records: list[dict[str, Any]], warnings: list[str]) -> dict[str, Any]:
     try:
         numpy_version = version("numpy")
@@ -491,8 +595,10 @@ def _build_manifest(discovery: Discovery, asset_records: list[dict[str, Any]], w
             },
         },
         "precision_scope": (
-            "Output samples are bit-exact copies of pillow-heif/libheif decoded arrays. "
-            "They cannot restore information lost when the source HEIF was encoded."
+            "Raw output samples are bit-exact copies of pillow-heif/libheif decoded arrays. "
+            "A derived_metric_depth output, when present, is an explicitly documented float32 "
+            "reconstruction from a raw uint8 uniform-disparity plane. Neither form can restore "
+            "information lost when the source HEIF was encoded."
         ),
         "asset_count": len(asset_records),
         "assets": asset_records,
@@ -616,6 +722,11 @@ def extract_file(source: Path | str, options: ExtractOptions | None = None) -> d
                     verify=lambda temp, a=asset.array: verify_npy(temp, a),
                 )
             )
+        if config.write_metric_depth and asset.kind == "depth":
+            try:
+                pending.append(_metric_depth_output(base, asset, index))
+            except MetricDepthError as exc:
+                warnings.append(f"{name}: metric-depth EXR was not written: {exc}")
         for metadata_index, block in enumerate(asset.metadata_blocks):
             raw = bytes(block.get("data", b""))
             if not raw:
@@ -659,6 +770,7 @@ def extract_file(source: Path | str, options: ExtractOptions | None = None) -> d
                 "sha256": sha256_file(temp),
                 "verified": True,
             }
+            output_record.update(_jsonable(item.details))
             if item.asset_index is not None:
                 records[item.asset_index]["outputs"].append(output_record)
 

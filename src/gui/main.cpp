@@ -131,8 +131,13 @@ public:
         auto *options = new QHBoxLayout;
         exactNpy_ = new QCheckBox(QStringLiteral("Write exact .npy companions"), central);
         exactNpy_->setChecked(true);
+        metricDepth_ = new QCheckBox(QStringLiteral("Reconstruct metric depth (.exr)"), central);
+        metricDepth_->setChecked(true);
+        metricDepth_->setToolTip(QStringLiteral(
+            "For eligible 8-bit uniform-disparity planes, write verified float32 physical depth in meters."));
         overwrite_ = new QCheckBox(QStringLiteral("Replace existing outputs"), central);
         options->addWidget(exactNpy_);
+        options->addWidget(metricDepth_);
         options->addWidget(overwrite_);
         options->addStretch();
         root->addLayout(options);
@@ -323,6 +328,9 @@ private:
             if (!exactNpy_->isChecked()) {
                 arguments << QStringLiteral("--no-npy");
             }
+            if (!metricDepth_->isChecked()) {
+                arguments << QStringLiteral("--no-metric-depth");
+            }
         }
         arguments << current_;
         if (auto *item = rootForPath(current_)) {
@@ -407,12 +415,14 @@ private:
         cancel_->setEnabled(running_);
         output_->setEnabled(!running_);
         exactNpy_->setEnabled(!running_);
+        metricDepth_->setEnabled(!running_);
         overwrite_->setEnabled(!running_);
     }
 
     QTreeWidget *files_ = nullptr;
     QLineEdit *output_ = nullptr;
     QCheckBox *exactNpy_ = nullptr;
+    QCheckBox *metricDepth_ = nullptr;
     QCheckBox *overwrite_ = nullptr;
     QPushButton *inspect_ = nullptr;
     QPushButton *extract_ = nullptr;

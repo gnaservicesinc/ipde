@@ -23,6 +23,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", type=Path, help="output directory (default: each source directory)")
     parser.add_argument("--overwrite", action="store_true", help="replace colliding outputs after verification")
     parser.add_argument("--no-npy", action="store_true", help="omit exact NumPy array companions")
+    parser.add_argument(
+        "--no-metric-depth",
+        action="store_true",
+        help="do not reconstruct eligible uint8 uniform-disparity planes as float32 meter EXRs",
+    )
     parser.add_argument("--version", action="version", version=f"IPDE {__version__}")
     return parser
 
@@ -64,6 +69,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     ExtractOptions(
                         output_dir=args.output_dir,
                         write_npy=not args.no_npy,
+                        write_metric_depth=not args.no_metric_depth,
                         overwrite=args.overwrite,
                     ),
                 )

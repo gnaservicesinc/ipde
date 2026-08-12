@@ -6,6 +6,7 @@ import binascii
 import hashlib
 import struct
 import zlib
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -171,7 +172,13 @@ def _exr_channels(array: np.ndarray) -> dict[str, np.ndarray]:
     raise FormatError(f"OpenEXR supports 1..4 channels here, not {channels}")
 
 
-def write_exr(path: Path, array: np.ndarray) -> None:
+def write_exr(
+    path: Path,
+    array: np.ndarray,
+    *,
+    storage_description: str = "Decoded sample values; no normalization or transfer function applied",
+    attributes: Mapping[str, str] | None = None,
+) -> None:
     try:
         import OpenEXR  # type: ignore[import-not-found]
     except ImportError as exc:
@@ -179,8 +186,10 @@ def write_exr(path: Path, array: np.ndarray) -> None:
     header = {
         "compression": OpenEXR.ZIP_COMPRESSION,
         "type": OpenEXR.scanlineimage,
-        "ipdeStorage": "Decoded sample values; no normalization or transfer function applied",
+        "ipdeStorage": storage_description,
     }
+    if attributes:
+        header.update(attributes)
     with OpenEXR.File(header, _exr_channels(array)) as output:
         output.write(str(path))
 
