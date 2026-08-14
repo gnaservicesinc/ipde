@@ -1,5 +1,6 @@
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QCoreApplication>
 #include <QDir>
 #include <QDragEnterEvent>
@@ -131,16 +132,65 @@ public:
         auto *options = new QHBoxLayout;
         exactNpy_ = new QCheckBox(QStringLiteral("Write exact .npy companions"), central);
         exactNpy_->setChecked(true);
-        metricDepth_ = new QCheckBox(QStringLiteral("Reconstruct metric depth (.exr)"), central);
+        physicalDisparity_ = new QCheckBox(QStringLiteral("Calibrated disparity (.exr, near = high)"), central);
+        physicalDisparity_->setChecked(true);
+        physicalDisparity_->setToolTip(QStringLiteral(
+            "Write float32 physical disparity in inverse meters. This remains linear with the source codes."));
+        metricDepth_ = new QCheckBox(QStringLiteral("Metric distance (.exr, near = low)"), central);
         metricDepth_->setChecked(true);
         metricDepth_->setToolTip(QStringLiteral(
-            "For eligible 8-bit uniform-disparity planes, write verified float32 physical depth in meters."));
+            "Write reciprocal float32 distance in meters. It retains the source's 8-bit quantization."));
+        stereoComparison_ = new QCheckBox(
+            QStringLiteral("Compare Stereo Matching + RAFT-Stereo height maps"), central);
+        stereoComparison_->setChecked(false);
+        stereoComparison_->setToolTip(QStringLiteral(
+            "Write two directly comparable full-resolution near-is-high float32 EXRs: one classical "
+            "StereoSGBM height map and one RAFT-Stereo height map. Diagnostic flow and metric-distance "
+            "maps are omitted."));
+        colorMatching_ = new QCheckBox(QStringLiteral("Color Matching"), central);
+        colorMatching_->setChecked(true);
+        colorMatching_->setToolTip(QStringLiteral(
+            "Before inference only, histogram-match each RGB channel of the non-Hero stereo view to "
+            "the Hero view. Raw extracted views remain untouched. This matches marginal code-value "
+            "curves; it is not an ICC conversion or a guarantee of pixelwise color equality."));
+        colorHero_ = new QComboBox(central);
+        colorHero_->addItem(QStringLiteral("Hero: Left view"), QStringLiteral("left"));
+        colorHero_->addItem(QStringLiteral("Hero: Right view"), QStringLiteral("right"));
+        colorMatching_->setEnabled(false);
+        colorHero_->setEnabled(false);
+        colorHero_->setToolTip(QStringLiteral(
+            "The Hero view is preserved unchanged; the other view receives the recorded histogram LUTs."));
+        displacementMaps_ = new QCheckBox(QStringLiteral("0–1 displacement maps"), central);
+        displacementMaps_->setChecked(true);
+        displacementMaps_->setEnabled(false);
+        displacementMaps_->setToolTip(QStringLiteral(
+            "Also write explicitly normalized float32 displacement derivatives. StereoSGBM and "
+            "RAFT use the same recorded 1st–99th percentile pixel-disparity range, while the "
+            "scientific pixel-disparity EXRs remain unchanged."));
+        raftDevice_ = new QComboBox(central);
+        raftDevice_->addItem(QStringLiteral("RAFT device: Automatic"), QStringLiteral("auto"));
+        raftDevice_->addItem(QStringLiteral("RAFT device: Apple Metal"), QStringLiteral("mps"));
+        raftDevice_->addItem(QStringLiteral("RAFT device: CPU"), QStringLiteral("cpu"));
+        raftDevice_->setEnabled(false);
+        raftDevice_->setToolTip(QStringLiteral(
+            "Automatic prefers Apple Metal on this Mac and falls back to CPU only when Metal is unavailable."));
         overwrite_ = new QCheckBox(QStringLiteral("Replace existing outputs"), central);
         options->addWidget(exactNpy_);
+        options->addWidget(physicalDisparity_);
         options->addWidget(metricDepth_);
         options->addWidget(overwrite_);
         options->addStretch();
         root->addLayout(options);
+
+        auto *spatialOptions = new QHBoxLayout;
+        spatialOptions->addWidget(new QLabel(QStringLiteral("Spatial Photo:"), central));
+        spatialOptions->addWidget(stereoComparison_);
+        spatialOptions->addWidget(colorMatching_);
+        spatialOptions->addWidget(colorHero_);
+        spatialOptions->addWidget(displacementMaps_);
+        spatialOptions->addWidget(raftDevice_);
+        spatialOptions->addStretch();
+        root->addLayout(spatialOptions);
 
         auto *runRow = new QHBoxLayout;
         progress_ = new QProgressBar(central);
@@ -201,6 +251,16 @@ public:
         });
         connect(inspect_, &QPushButton::clicked, this, [this] { beginQueue(true); });
         connect(extract_, &QPushButton::clicked, this, [this] { beginQueue(false); });
+        connect(stereoComparison_, &QCheckBox::toggled, this, [this](bool checked) {
+            raftDevice_->setEnabled(checked && !running_);
+            colorMatching_->setEnabled(checked && !running_);
+            colorHero_->setEnabled(checked && colorMatching_->isChecked() && !running_);
+            displacementMaps_->setEnabled(checked && !running_);
+        });
+        connect(colorMatching_, &QCheckBox::toggled, this, [this](bool checked) {
+            colorHero_->setEnabled(
+                checked && stereoComparison_->isChecked() && !running_);
+        });
         connect(cancel_, &QPushButton::clicked, this, [this] {
             cancelled_ = true;
             queue_.clear();
@@ -331,6 +391,20 @@ private:
             if (!metricDepth_->isChecked()) {
                 arguments << QStringLiteral("--no-metric-depth");
             }
+            if (!physicalDisparity_->isChecked()) {
+                arguments << QStringLiteral("--no-physical-disparity");
+            }
+            if (stereoComparison_->isChecked()) {
+                arguments << QStringLiteral("--stereo-comparison") << QStringLiteral("--raft-device")
+                          << raftDevice_->currentData().toString();
+                if (displacementMaps_->isChecked()) {
+                    arguments << QStringLiteral("--displacement-maps");
+                }
+                if (colorMatching_->isChecked()) {
+                    arguments << QStringLiteral("--color-matching") << QStringLiteral("--color-hero")
+                              << colorHero_->currentData().toString();
+                }
+            }
         }
         arguments << current_;
         if (auto *item = rootForPath(current_)) {
@@ -362,7 +436,13 @@ private:
                     delete root->takeChild(0);
                 }
                 const QJsonArray assets = object.value(QStringLiteral("assets")).toArray();
-                root->setText(1, QStringLiteral("%1 plane(s)").arg(assets.size()));
+                const QJsonObject source = object.value(QStringLiteral("source")).toObject();
+                const QJsonObject spatial = source.value(QStringLiteral("spatial_photo")).toObject();
+                int outputCount = 0;
+                root->setText(
+                    1,
+                    spatial.isEmpty() ? QStringLiteral("%1 plane(s)").arg(assets.size())
+                                      : QStringLiteral("Spatial Photo · %1 plane(s)").arg(assets.size()));
                 root->setText(2, inspectOnly_ ? QStringLiteral("Decoded inventory") : QStringLiteral("Verified outputs"));
                 for (const QJsonValue &value : assets) {
                     const QJsonObject asset = value.toObject();
@@ -378,12 +458,32 @@ private:
                     if (!auxType.isEmpty()) {
                         child->setToolTip(0, auxType);
                     }
+                    const QJsonArray outputs = asset.value(QStringLiteral("outputs")).toArray();
+                    outputCount += outputs.size();
+                    for (const QJsonValue &outputValue : outputs) {
+                        const QJsonObject output = outputValue.toObject();
+                        auto *outputItem = new QTreeWidgetItem(child);
+                        outputItem->setText(0, output.value(QStringLiteral("filename")).toString());
+                        outputItem->setText(1, QStringLiteral("Verified"));
+                        outputItem->setText(2, output.value(QStringLiteral("role")).toString());
+                        outputItem->setToolTip(0, output.value(QStringLiteral("path")).toString());
+                    }
+                    child->setExpanded(!outputs.isEmpty());
                 }
                 root->setExpanded(true);
+                if (!spatial.isEmpty()) {
+                    log_->append(
+                        QStringLiteral("%1: Spatial Photo — left %2, right %3, baseline %4 mm, disparity adjustment %5%")
+                            .arg(QFileInfo(current_).fileName())
+                            .arg(spatial.value(QStringLiteral("left_image_index")).toInt())
+                            .arg(spatial.value(QStringLiteral("right_image_index")).toInt())
+                            .arg(spatial.value(QStringLiteral("baseline_millimeters")).toDouble(), 0, 'f', 6)
+                            .arg(spatial.value(QStringLiteral("disparity_adjustment_fraction_of_width")).toDouble() * 100.0, 0, 'f', 4));
+                }
                 if (!inspectOnly_) {
-                    log_->append(QStringLiteral("%1: wrote %2 verified plane(s); manifest %3")
+                    log_->append(QStringLiteral("%1: wrote %2 verified file(s); manifest %3")
                                      .arg(QFileInfo(current_).fileName())
-                                     .arg(assets.size())
+                                     .arg(outputCount)
                                      .arg(object.value(QStringLiteral("manifest_path")).toString()));
                 }
             }
@@ -415,14 +515,27 @@ private:
         cancel_->setEnabled(running_);
         output_->setEnabled(!running_);
         exactNpy_->setEnabled(!running_);
+        physicalDisparity_->setEnabled(!running_);
         metricDepth_->setEnabled(!running_);
+        stereoComparison_->setEnabled(!running_);
+        colorMatching_->setEnabled(!running_ && stereoComparison_->isChecked());
+        colorHero_->setEnabled(
+            !running_ && stereoComparison_->isChecked() && colorMatching_->isChecked());
+        displacementMaps_->setEnabled(!running_ && stereoComparison_->isChecked());
+        raftDevice_->setEnabled(!running_ && stereoComparison_->isChecked());
         overwrite_->setEnabled(!running_);
     }
 
     QTreeWidget *files_ = nullptr;
     QLineEdit *output_ = nullptr;
     QCheckBox *exactNpy_ = nullptr;
+    QCheckBox *physicalDisparity_ = nullptr;
     QCheckBox *metricDepth_ = nullptr;
+    QCheckBox *stereoComparison_ = nullptr;
+    QCheckBox *colorMatching_ = nullptr;
+    QComboBox *colorHero_ = nullptr;
+    QCheckBox *displacementMaps_ = nullptr;
+    QComboBox *raftDevice_ = nullptr;
     QCheckBox *overwrite_ = nullptr;
     QPushButton *inspect_ = nullptr;
     QPushButton *extract_ = nullptr;

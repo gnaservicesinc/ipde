@@ -20,10 +20,12 @@ set(IPDE_PYTHON_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/ipde_extract.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ipde/__init__.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ipde/__main__.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ipde/apple_imageio.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ipde/cli.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ipde/extractor.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ipde/formats.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ipde/libheif_aux.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ipde/spatial.py"
 )
 
 target_link_libraries(ipde_gui PRIVATE Qt6::Widgets)
@@ -71,6 +73,8 @@ if(APPLE)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/src/ipde/__main__.py" "${resource_root}/src/ipde/__main__.py"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/ipde/apple_imageio.py" "${resource_root}/src/ipde/apple_imageio.py"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/src/ipde/cli.py" "${resource_root}/src/ipde/cli.py"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/src/ipde/extractor.py" "${resource_root}/src/ipde/extractor.py"
@@ -78,6 +82,8 @@ if(APPLE)
             "${CMAKE_CURRENT_SOURCE_DIR}/src/ipde/formats.py" "${resource_root}/src/ipde/formats.py"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/src/ipde/libheif_aux.py" "${resource_root}/src/ipde/libheif_aux.py"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/ipde/spatial.py" "${resource_root}/src/ipde/spatial.py"
         COMMENT "Embedding the Python extraction engine in IPDE.app"
     )
 endif()

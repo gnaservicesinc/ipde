@@ -1,4 +1,7 @@
 numpy>=2.0
+opencv-python-headless>=4.13,<5
 pillow-heif>=1.5.0
 OpenEXR>=3.4.4
-
+opt_einsum>=3.3
+scipy>=1.10
+torch>=2.0

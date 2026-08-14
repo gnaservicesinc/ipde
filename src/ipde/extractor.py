@@ -19,6 +19,7 @@ from typing import Any, Callable
 import numpy as np
 import pillow_heif
 
+from .apple_imageio import ImageIOMetadataError, read_apple_imageio_metadata
 from .formats import (
     FormatError,
     sha256_array,
@@ -31,6 +32,20 @@ from .formats import (
     write_png,
 )
 from .libheif_aux import HighBitAuxiliaryError, decode_high_bit_auxiliary
+from .spatial import (
+    ColorMatchingError,
+    DisplacementMappingError,
+    RaftStereoError,
+    RaftStereoOptions,
+    SpatialPhotoError,
+    StereoMatchingError,
+    StereoMatchingOptions,
+    analyze_spatial_photo,
+    histogram_match_stereo_pair,
+    normalize_height_maps_for_displacement,
+    run_raft_stereo,
+    run_stereo_matching,
+)
 
 
 MINIMUM_PILLOW_HEIF = (1, 5, 0)
@@ -51,6 +66,19 @@ class ExtractOptions:
     output_dir: Path | None = None
     write_npy: bool = True
     write_metric_depth: bool = True
+    write_physical_disparity: bool = True
+    write_stereo_matching: bool = False
+    write_raft_stereo: bool = False
+    write_raft_diagnostics: bool = False
+    histogram_color_matching: bool = False
+    color_matching_hero: str = "left"
+    write_displacement_maps: bool = False
+    stereo_maximum_disparity: int | None = None
+    raft_root: Path | None = None
+    raft_model: Path | None = None
+    raft_model_member: str | None = None
+    raft_device: str = "auto"
+    raft_iterations: int = 32
     overwrite: bool = False
 
 
@@ -79,6 +107,8 @@ class Discovery:
     primary_index: int
     top_level_images: list[dict[str, Any]]
     assets: list[Asset]
+    spatial_photo: dict[str, Any] | None = None
+    spatial_metadata_warning: str | None = None
 
 
 @dataclass
@@ -96,11 +126,11 @@ class MetricDepthError(ValueError):
     """Raised when a depth plane cannot be reconstructed as physical meters."""
 
 
-def reconstruct_metric_depth(raw_depth: np.ndarray, metadata: Mapping[str, Any]) -> np.ndarray:
-    """Convert an 8-bit uniform-disparity plane to float32 physical depth in meters.
+def reconstruct_physical_disparity(raw_depth: np.ndarray, metadata: Mapping[str, Any]) -> np.ndarray:
+    """Convert an 8-bit uniform-disparity plane to calibrated float32 inverse meters.
 
-    The operations and their order intentionally mirror the HEIF depth metadata
-    mapping. Every operation is vectorized and explicitly performed in float32.
+    This is a calibrated representation conversion, not precision restoration:
+    the result retains exactly the source plane's quantization levels.
     """
     raw = np.asarray(raw_depth)
     if raw.dtype != np.dtype("uint8"):
@@ -139,6 +169,17 @@ def reconstruct_metric_depth(raw_depth: np.ndarray, metadata: Mapping[str, Any])
     float_samples = raw.astype(np.float32)
     normalized = float_samples / np.float32(255.0)
     disparity = normalized * (d_max - d_min) + d_min
+    return np.ascontiguousarray(disparity, dtype=np.float32)
+
+
+def reconstruct_metric_depth(raw_depth: np.ndarray, metadata: Mapping[str, Any]) -> np.ndarray:
+    """Convert an 8-bit uniform-disparity plane to float32 physical depth in meters.
+
+    Every operation is vectorized and explicitly performed in float32. Physical
+    depth is the reciprocal of disparity, so nearer geometry has smaller values.
+    The conversion cannot recreate precision absent from the uint8 source.
+    """
+    disparity = reconstruct_physical_disparity(raw_depth, metadata)
     with np.errstate(divide="ignore", invalid="ignore"):
         depth_meters = np.float32(1.0) / disparity
     return np.ascontiguousarray(depth_meters, dtype=np.float32)
@@ -315,6 +356,17 @@ def discover_file(source: Path) -> Discovery:
     except Exception as exc:
         raise ExtractionError(f"could not open HEIF container {path.name}: {exc}") from exc
 
+    spatial_metadata_warning: str | None = None
+    try:
+        imageio_metadata = read_apple_imageio_metadata(source_bytes)
+    except ImageIOMetadataError as exc:
+        imageio_metadata = None
+        spatial_metadata_warning = f"Apple spatial metadata was unavailable: {exc}"
+    try:
+        spatial_photo = analyze_spatial_photo(imageio_metadata)
+    except SpatialPhotoError as exc:
+        raise ExtractionError(f"invalid Apple spatial-photo metadata: {exc}") from exc
+
     assets: list[Asset] = []
     image_contexts: list[dict[str, Any]] = []
     for image_index, image in enumerate(heif):
@@ -401,6 +453,43 @@ def discover_file(source: Path) -> Discovery:
                 )
             )
 
+    if spatial_photo is not None:
+        left_index = int(spatial_photo["left_image_index"])
+        right_index = int(spatial_photo["right_image_index"])
+        if max(left_index, right_index) >= len(heif):
+            raise ExtractionError(
+                "Apple spatial-photo group does not match pillow-heif's top-level image inventory"
+            )
+        roles = (
+            ("left", left_index, spatial_photo["left_camera"]),
+            ("right", right_index, spatial_photo["right_camera"]),
+        )
+        for role, image_index, camera in roles:
+            image = heif[image_index]
+            if 0 <= image_index < len(image_contexts):
+                image_contexts[image_index]["spatial_role"] = role
+            assets.append(
+                Asset(
+                    kind="spatial_view",
+                    parent_image_index=image_index,
+                    ordinal=0,
+                    array=_array_copy(image),
+                    mode=image.mode,
+                    source_bit_depth=_source_bit_depth(
+                        image, int(image.info.get("bit_depth", 0) or 0)
+                    ),
+                    semantic_name=f"spatial_{role}",
+                    metadata={
+                        "spatial_role": role,
+                        "group_index": spatial_photo["group_index"],
+                        "camera": camera,
+                        "decoded_orientation_policy": spatial_photo[
+                            "decoded_orientation_policy"
+                        ],
+                    },
+                )
+            )
+
     return Discovery(
         source=path,
         source_size=len(source_bytes),
@@ -409,6 +498,8 @@ def discover_file(source: Path) -> Discovery:
         primary_index=int(heif.primary_index),
         top_level_images=image_contexts,
         assets=assets,
+        spatial_photo=spatial_photo,
+        spatial_metadata_warning=spatial_metadata_warning,
     )
 
 
@@ -468,7 +559,9 @@ def _base_names(discovery: Discovery) -> list[str]:
         name = asset.semantic_name
         occurrence = occurrences.get(name, 0)
         occurrences[name] = occurrence + 1
-        if counts[name] == 1 and asset.parent_image_index == discovery.primary_index:
+        if asset.kind == "spatial_view" and counts[name] == 1:
+            suffix = name
+        elif counts[name] == 1 and asset.parent_image_index == discovery.primary_index:
             suffix = name
         else:
             suffix = f"image{asset.parent_image_index}_{name}{occurrence}"
@@ -515,36 +608,115 @@ def _exchange_output(path_base: Path, asset: Asset, asset_index: int) -> Pending
     )
 
 
-def _metric_depth_output(path_base: Path, asset: Asset, asset_index: int) -> PendingOutput:
-    depth_meters = reconstruct_metric_depth(asset.array, asset.metadata)
-    finite = np.isfinite(depth_meters)
+def _finite_array_summary(array: np.ndarray, unit_suffix: str) -> dict[str, Any]:
+    finite = np.isfinite(array)
     if finite.any():
-        minimum: int | float | str = _stat_value(depth_meters[finite].min())
-        maximum: int | float | str = _stat_value(depth_meters[finite].max())
+        minimum: int | float | str = _stat_value(array[finite].min())
+        maximum: int | float | str = _stat_value(array[finite].max())
     else:
         minimum = maximum = "NaN"
+    return {
+        f"minimum_finite_{unit_suffix}": minimum,
+        f"maximum_finite_{unit_suffix}": maximum,
+        "nonfinite_count": int(array.size - np.count_nonzero(finite)),
+        "distinct_values_present": int(np.unique(array).size),
+    }
+
+
+def _source_quantization_details(asset: Asset) -> dict[str, Any]:
+    return {
+        "source_dtype": asset.array.dtype.name,
+        "source_bit_depth": asset.source_bit_depth,
+        "possible_source_code_count": 256,
+        "source_codes_present": int(np.unique(asset.array).size),
+        "restores_additional_precision": False,
+        "note": (
+            "Float32 stores calibrated values, but each output sample still derives from one uint8 code; "
+            "no missing scene measurements are reconstructed."
+        ),
+    }
+
+
+def _physical_disparity_output(
+    path_base: Path,
+    asset: Asset,
+    asset_index: int,
+    disparity: np.ndarray,
+) -> PendingOutput:
+    d_min = float(asset.metadata["d_min"])
+    d_max = float(asset.metadata["d_max"])
+    path = Path(f"{path_base}_disparity.exr")
+    derivation = {
+        "name": "uniform_disparity_to_physical_disparity",
+        "output_dtype": disparity.dtype.name,
+        "normalization_divisor": 255.0,
+        "d_min": d_min,
+        "d_max": d_max,
+        "units": "1/m",
+        "value_direction": "larger values indicate nearer geometry",
+        "formula": (
+            "normalized = float32(raw) / float32(255.0); "
+            "disparity = normalized * (float32(d_max) - float32(d_min)) + float32(d_min)"
+        ),
+        "nominal_code_step_inverse_meters": _stat_value(
+            (np.float32(d_max) - np.float32(d_min)) / np.float32(255.0)
+        ),
+        "shape": list(disparity.shape),
+        "derived_data_sha256": sha256_array(disparity),
+        "source_quantization": _source_quantization_details(asset),
+        **_finite_array_summary(disparity, "inverse_meters"),
+    }
+    return PendingOutput(
+        final_path=path,
+        role="derived_physical_disparity",
+        asset_index=asset_index,
+        write=lambda temp, a=disparity: write_exr(
+            temp,
+            a,
+            storage_description="Derived float32 calibrated disparity; each Y sample is inverse meters",
+            attributes={
+                "ipdeUnits": "inverse meters",
+                "ipdeSemantic": "disparity/proximity; near values are larger",
+                "ipdeTransform": "disparity=raw/255*(d_max-d_min)+d_min",
+                "ipdePrecision": "calibrated from uint8; no additional source precision",
+            },
+        ),
+        verify=lambda temp, a=disparity: verify_exr(temp, a),
+        details={"derivation": derivation},
+    )
+
+
+def _metric_depth_output(
+    path_base: Path,
+    asset: Asset,
+    asset_index: int,
+    depth_meters: np.ndarray,
+) -> PendingOutput:
     d_min = float(asset.metadata["d_min"])
     d_max = float(asset.metadata["d_max"])
     path = Path(f"{path_base}_meters.exr")
+    codebook = reconstruct_metric_depth(np.arange(256, dtype=np.uint8).reshape(1, 256), asset.metadata)[0]
+    code_steps = np.abs(np.diff(codebook))
     derivation = {
         "name": "uniform_disparity_to_metric_depth",
-        "source_dtype": asset.array.dtype.name,
         "output_dtype": depth_meters.dtype.name,
         "normalization_divisor": 255.0,
         "d_min": d_min,
         "d_max": d_max,
         "disparity_units": "1/m",
         "depth_units": "m",
+        "value_direction": "larger values indicate farther geometry; nearer geometry is numerically smaller",
         "formula": (
             "normalized = float32(raw) / float32(255.0); "
             "disparity = normalized * (float32(d_max) - float32(d_min)) + float32(d_min); "
             "depth_meters = float32(1.0) / disparity"
         ),
         "shape": list(depth_meters.shape),
-        "minimum_finite_meters": minimum,
-        "maximum_finite_meters": maximum,
-        "nonfinite_count": int(depth_meters.size - np.count_nonzero(finite)),
+        "minimum_one_code_step_meters": _stat_value(code_steps.min()),
+        "maximum_one_code_step_meters": _stat_value(code_steps.max()),
         "derived_data_sha256": sha256_array(depth_meters),
+        "source_quantization": _source_quantization_details(asset),
+        **_finite_array_summary(depth_meters, "meters"),
     }
     return PendingOutput(
         final_path=path,
@@ -556,12 +728,327 @@ def _metric_depth_output(path_base: Path, asset: Asset, asset_index: int) -> Pen
             storage_description="Derived float32 physical depth; each Y sample is distance in meters",
             attributes={
                 "ipdeUnits": "meters",
+                "ipdeSemantic": "physical distance; near values are smaller",
                 "ipdeTransform": "depth=1/(raw/255*(d_max-d_min)+d_min)",
+                "ipdePrecision": "calibrated from uint8; no additional source precision",
             },
         ),
         verify=lambda temp, a=depth_meters: verify_exr(temp, a),
         details={"derivation": derivation},
     )
+
+
+def _inference_output_details(
+    array: np.ndarray,
+    inference: Mapping[str, Any],
+    *,
+    name: str,
+    units: str,
+    value_direction: str,
+) -> dict[str, Any]:
+    finite = np.isfinite(array)
+    return {
+        "derivation": {
+            **dict(inference),
+            "name": name,
+            "units": units,
+            "value_direction": value_direction,
+            "shape": list(array.shape),
+            "dtype": array.dtype.name,
+            "derived_data_sha256": sha256_array(array),
+            "minimum_finite": _stat_value(array[finite].min()) if finite.any() else "NaN",
+            "maximum_finite": _stat_value(array[finite].max()) if finite.any() else "NaN",
+            "nonfinite_count": int(array.size - np.count_nonzero(finite)),
+        }
+    }
+
+
+def _raft_exr_output(
+    path: Path,
+    role: str,
+    asset_index: int,
+    array: np.ndarray,
+    details: dict[str, Any],
+    *,
+    units: str,
+    semantic: str,
+    transform: str,
+) -> PendingOutput:
+    color_matching = details.get("derivation", {}).get("input_color_matching", {})
+    color_matching_description = (
+        f"per-channel uint8 CDF; Hero {color_matching.get('hero_side', 'unspecified')}"
+        if color_matching.get("applied")
+        else "disabled"
+    )
+    return PendingOutput(
+        final_path=path,
+        role=role,
+        asset_index=asset_index,
+        write=lambda temp, a=array: write_exr(
+            temp,
+            a,
+            storage_description=(
+                "Full-resolution RAFT-Stereo float32 inference; no display normalization, "
+                "gamma correction, or tone mapping applied"
+            ),
+            attributes={
+                "ipdeUnits": units,
+                "ipdeSemantic": semantic,
+                "ipdeTransform": transform,
+                "ipdePrecision": "AI-inferred float32 estimate; not measured source depth",
+                "ipdeColorMatching": color_matching_description,
+            },
+        ),
+        verify=lambda temp, a=array: verify_exr(temp, a),
+        details=details,
+    )
+
+
+def _raft_pending_outputs(
+    output_dir: Path,
+    discovery: Discovery,
+    asset_index: int,
+    result: Any,
+    *,
+    write_npy_companions: bool,
+    include_diagnostics: bool,
+    color_matched: bool,
+) -> list[PendingOutput]:
+    color_suffix = "_color_matched" if color_matched else ""
+    stem = output_dir / f"{discovery.source.stem}_spatial_raft_stereo{color_suffix}"
+    specifications = [
+        (
+            "height",
+            result.height_disparity_pixels,
+            "derived_raft_stereo_height_map",
+            "pixels",
+            "nonnegative stereo disparity height map; near values are generally larger",
+            "abs(signed_flow + (cx_right-cx_left))",
+            "larger values generally indicate nearer geometry",
+        ),
+    ]
+    if include_diagnostics:
+        specifications.extend(
+            (
+                (
+                    "signed_flow",
+                    result.signed_flow_pixels,
+                    "derived_raft_stereo_signed_flow",
+                    "pixels",
+                    "signed horizontal x_right - x_left correspondence displacement",
+                    "model output without numeric transformation",
+                    "signed correspondence displacement; sign depends on stored stereo coordinates",
+                ),
+                (
+                    "depth_meters",
+                    result.depth_meters,
+                    "derived_raft_stereo_metric_depth",
+                    "meters",
+                    "metric camera distance; near values are smaller",
+                    "float32(focal_length_pixels*baseline_meters)/height_disparity_pixels",
+                    "smaller values indicate nearer geometry",
+                ),
+            )
+        )
+    pending: list[PendingOutput] = []
+    for suffix, array, role, units, semantic, transform, direction in specifications:
+        path_base = Path(f"{stem}_{suffix}")
+        details = _inference_output_details(
+            array,
+            result.details,
+            name=role,
+            units=units,
+            value_direction=direction,
+        )
+        pending.append(
+            _raft_exr_output(
+                Path(f"{path_base}.exr"),
+                role,
+                asset_index,
+                array,
+                details,
+                units=units,
+                semantic=semantic,
+                transform=transform,
+            )
+        )
+        if write_npy_companions:
+            pending.append(
+                PendingOutput(
+                    final_path=Path(f"{path_base}.npy"),
+                    role=f"{role}_exact_array",
+                    asset_index=asset_index,
+                    write=lambda temp, a=array: write_npy(temp, a),
+                    verify=lambda temp, a=array: verify_npy(temp, a),
+                    details=details,
+                )
+            )
+    return pending
+
+
+def _stereo_matching_pending_outputs(
+    output_dir: Path,
+    discovery: Discovery,
+    asset_index: int,
+    result: Any,
+    *,
+    write_npy_companions: bool,
+    color_matched: bool,
+) -> list[PendingOutput]:
+    color_suffix = "_color_matched" if color_matched else ""
+    path_base = (
+        output_dir
+        / f"{discovery.source.stem}_spatial_stereo_matching{color_suffix}_height"
+    )
+    array = result.height_disparity_pixels
+    role = "derived_stereo_matching_height_map"
+    details = _inference_output_details(
+        array,
+        result.details,
+        name=role,
+        units="pixels",
+        value_direction="larger values generally indicate nearer geometry; NaN means unmatched",
+    )
+    color_matching = details.get("derivation", {}).get("input_color_matching", {})
+    color_matching_description = (
+        f"per-channel uint8 CDF; Hero {color_matching.get('hero_side', 'unspecified')}"
+        if color_matching.get("applied")
+        else "disabled"
+    )
+    pending = [
+        PendingOutput(
+            final_path=Path(f"{path_base}.exr"),
+            role=role,
+            asset_index=asset_index,
+            write=lambda temp, a=array: write_exr(
+                temp,
+                a,
+                storage_description=(
+                    "Full-resolution OpenCV StereoSGBM float32 height estimate; no display "
+                    "normalization, gamma correction, tone mapping, resizing, or hole filling applied"
+                ),
+                attributes={
+                    "ipdeUnits": "pixels",
+                    "ipdeSemantic": (
+                        "classical stereo-matching disparity height; near is generally high; "
+                        "NaN is unmatched"
+                    ),
+                    "ipdeTransform": (
+                        "abs((StereoSGBM fixed disparity / 16) + (cx_right-cx_left))"
+                    ),
+                    "ipdePrecision": (
+                        "classical 1/16-pixel inferred estimate; not measured source depth"
+                    ),
+                    "ipdeColorMatching": color_matching_description,
+                },
+            ),
+            verify=lambda temp, a=array: verify_exr(temp, a),
+            details=details,
+        )
+    ]
+    if write_npy_companions:
+        pending.append(
+            PendingOutput(
+                final_path=Path(f"{path_base}.npy"),
+                role=f"{role}_exact_array",
+                asset_index=asset_index,
+                write=lambda temp, a=array: write_npy(temp, a),
+                verify=lambda temp, a=array: verify_npy(temp, a),
+                details=details,
+            )
+        )
+    return pending
+
+
+def _displacement_pending_outputs(
+    output_dir: Path,
+    discovery: Discovery,
+    asset_index: int,
+    array: np.ndarray,
+    *,
+    engine_name: str,
+    inference_details: Mapping[str, Any],
+    mapping_details: Mapping[str, Any],
+    color_matched: bool,
+    write_npy_companions: bool,
+) -> list[PendingOutput]:
+    if engine_name == "stereo_matching":
+        filename_engine = "stereo_matching"
+        role = "derived_stereo_matching_displacement_0_to_1"
+        semantic_engine = "classical StereoSGBM"
+    elif engine_name == "raft_stereo":
+        filename_engine = "raft_stereo"
+        role = "derived_raft_stereo_displacement_0_to_1"
+        semantic_engine = "RAFT-Stereo"
+    else:
+        raise ExtractionError(f"unsupported displacement-map engine {engine_name!r}")
+    color_suffix = "_color_matched" if color_matched else ""
+    path_base = (
+        output_dir
+        / f"{discovery.source.stem}_spatial_{filename_engine}{color_suffix}_displacement_0_to_1"
+    )
+    combined_details = {
+        **dict(inference_details),
+        "displacement_mapping": dict(mapping_details),
+    }
+    details = _inference_output_details(
+        array,
+        combined_details,
+        name=role,
+        units="normalized 0..1",
+        value_direction="larger values indicate nearer geometry; NaN remains unmatched",
+    )
+    color_matching = combined_details.get("input_color_matching", {})
+    color_matching_description = (
+        f"per-channel uint8 CDF; Hero {color_matching.get('hero_side', 'unspecified')}"
+        if color_matching.get("applied")
+        else "disabled"
+    )
+    bounds = mapping_details
+    pending = [
+        PendingOutput(
+            final_path=Path(f"{path_base}.exr"),
+            role=role,
+            asset_index=asset_index,
+            write=lambda temp, a=array: write_exr(
+                temp,
+                a,
+                storage_description=(
+                    "Explicit full-resolution 0..1 displacement derivative; shared robust linear "
+                    "mapping from the separately preserved pixel-disparity height map"
+                ),
+                attributes={
+                    "ipdeUnits": "normalized 0..1",
+                    "ipdeSemantic": (
+                        f"{semantic_engine} displacement-ready height; near is high; NaN is unmatched"
+                    ),
+                    "ipdeTransform": str(bounds["formula"]),
+                    "ipdeDisparityBoundsPixels": (
+                        f"{bounds['lower_bound_pixels_float32']},"
+                        f"{bounds['upper_bound_pixels_float32']}"
+                    ),
+                    "ipdePrecision": (
+                        "explicit normalized derivative; scientific pixel-disparity output retained separately"
+                    ),
+                    "ipdeColorMatching": color_matching_description,
+                },
+            ),
+            verify=lambda temp, a=array: verify_exr(temp, a),
+            details=details,
+        )
+    ]
+    if write_npy_companions:
+        pending.append(
+            PendingOutput(
+                final_path=Path(f"{path_base}.npy"),
+                role=f"{role}_exact_array",
+                asset_index=asset_index,
+                write=lambda temp, a=array: write_npy(temp, a),
+                verify=lambda temp, a=array: verify_npy(temp, a),
+                details=details,
+            )
+        )
+    return pending
 
 
 def _build_manifest(discovery: Discovery, asset_records: list[dict[str, Any]], warnings: list[str]) -> dict[str, Any]:
@@ -579,6 +1066,7 @@ def _build_manifest(discovery: Discovery, asset_records: list[dict[str, Any]], w
             "mimetype": discovery.mimetype,
             "primary_image_index": discovery.primary_index,
             "top_level_images": discovery.top_level_images,
+            "spatial_photo": _jsonable(discovery.spatial_photo),
         },
         "decoder": {
             "pillow_heif": _check_runtime(),
@@ -596,9 +1084,12 @@ def _build_manifest(discovery: Discovery, asset_records: list[dict[str, Any]], w
         },
         "precision_scope": (
             "Raw output samples are bit-exact copies of pillow-heif/libheif decoded arrays. "
-            "A derived_metric_depth output, when present, is an explicitly documented float32 "
-            "reconstruction from a raw uint8 uniform-disparity plane. Neither form can restore "
-            "information lost when the source HEIF was encoded."
+            "Derived physical disparity and metric depth outputs, when present, are explicitly "
+            "documented float32 calibrations of a raw uint8 uniform-disparity plane. Float32 changes "
+            "the numeric representation and units, not the source quantization or amount of captured "
+            "scene information. Classical StereoSGBM and RAFT-Stereo outputs, when requested, are "
+            "explicitly identified inferred float32 estimates derived from the preserved stereo views. "
+            "No output can restore information lost when the source HEIF was encoded."
         ),
         "asset_count": len(asset_records),
         "assets": asset_records,
@@ -606,11 +1097,27 @@ def _build_manifest(discovery: Discovery, asset_records: list[dict[str, Any]], w
     }
 
 
+def _discovery_warnings(discovery: Discovery) -> list[str]:
+    warnings: list[str] = []
+    if discovery.spatial_metadata_warning:
+        warnings.append(discovery.spatial_metadata_warning)
+    if discovery.spatial_photo:
+        for aggressor in discovery.spatial_photo.get("stereo_aggressors", []):
+            if isinstance(aggressor, Mapping):
+                aggressor_type = str(aggressor.get("Type", "unspecified"))
+            else:
+                aggressor_type = str(aggressor)
+            warnings.append(f"Apple spatial-photo stereo aggressor: {aggressor_type}")
+    return warnings
+
+
 def _report(discovery: Discovery) -> dict[str, Any]:
     records = [_asset_record(asset) for asset in discovery.assets]
-    warnings = []
+    warnings = _discovery_warnings(discovery)
     if not records:
-        warnings.append("No depth, non-alpha auxiliary, or alpha planes were exposed by pillow-heif.")
+        warnings.append(
+            "No depth, non-alpha auxiliary, alpha, or spatial-view planes were exposed."
+        )
     return _build_manifest(discovery, records, warnings)
 
 
@@ -688,6 +1195,17 @@ def _commit_outputs(
             backup.unlink(missing_ok=True)
 
 
+def _check_output_paths(paths: list[Path], *, overwrite: bool) -> None:
+    if len({os.path.normcase(str(path)) for path in paths}) != len(paths):
+        raise ExtractionError("generated output names collide")
+    collisions = [path for path in paths if path.exists()]
+    if collisions and not overwrite:
+        joined = ", ".join(path.name for path in collisions[:5])
+        if len(collisions) > 5:
+            joined += f", and {len(collisions) - 5} more"
+        raise ExtractionError(f"output already exists (use --overwrite): {joined}")
+
+
 def extract_file(source: Path | str, options: ExtractOptions | None = None) -> dict[str, Any]:
     config = options or ExtractOptions()
     discovery = discover_file(Path(source))
@@ -698,9 +1216,11 @@ def extract_file(source: Path | str, options: ExtractOptions | None = None) -> d
 
     names = _base_names(discovery)
     records = [_asset_record(asset) for asset in discovery.assets]
-    warnings: list[str] = []
+    warnings = _discovery_warnings(discovery)
     if not records:
-        warnings.append("No depth, non-alpha auxiliary, or alpha planes were exposed by pillow-heif.")
+        warnings.append(
+            "No depth, non-alpha auxiliary, alpha, or spatial-view planes were exposed."
+        )
     pending: list[PendingOutput] = []
 
     for index, (asset, name) in enumerate(zip(discovery.assets, names, strict=True)):
@@ -722,11 +1242,18 @@ def extract_file(source: Path | str, options: ExtractOptions | None = None) -> d
                     verify=lambda temp, a=asset.array: verify_npy(temp, a),
                 )
             )
-        if config.write_metric_depth and asset.kind == "depth":
+        if (config.write_metric_depth or config.write_physical_disparity) and asset.kind == "depth":
             try:
-                pending.append(_metric_depth_output(base, asset, index))
+                disparity = reconstruct_physical_disparity(asset.array, asset.metadata)
             except MetricDepthError as exc:
-                warnings.append(f"{name}: metric-depth EXR was not written: {exc}")
+                warnings.append(f"{name}: calibrated float32 depth products were not written: {exc}")
+            else:
+                if config.write_physical_disparity:
+                    pending.append(_physical_disparity_output(base, asset, index, disparity))
+                if config.write_metric_depth:
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        depth_meters = np.ascontiguousarray(np.float32(1.0) / disparity, dtype=np.float32)
+                    pending.append(_metric_depth_output(base, asset, index, depth_meters))
         for metadata_index, block in enumerate(asset.metadata_blocks):
             raw = bytes(block.get("data", b""))
             if not raw:
@@ -743,15 +1270,182 @@ def extract_file(source: Path | str, options: ExtractOptions | None = None) -> d
             )
 
     manifest_path = output_dir / f"{discovery.source.stem}_aux_manifest.json"
+    write_raft = config.write_raft_stereo or config.write_raft_diagnostics
+    write_spatial_height = config.write_stereo_matching or write_raft
+    if config.write_displacement_maps and not write_spatial_height:
+        raise ExtractionError(
+            "0..1 displacement maps require --stereo-matching, --raft-stereo, or --stereo-comparison"
+        )
+    if write_spatial_height and discovery.spatial_photo is None:
+        warnings.append(
+            "Spatial stereo height maps were requested, but this HEIF has no Apple stereo-pair group."
+        )
+    elif write_spatial_height:
+        predicted_bases: list[Path] = []
+        color_suffix = "_color_matched" if config.histogram_color_matching else ""
+        if config.write_stereo_matching:
+            predicted_bases.append(
+                output_dir
+                / f"{discovery.source.stem}_spatial_stereo_matching{color_suffix}_height"
+            )
+            if config.write_displacement_maps:
+                predicted_bases.append(
+                    output_dir
+                    / f"{discovery.source.stem}_spatial_stereo_matching{color_suffix}_displacement_0_to_1"
+                )
+        if write_raft:
+            predicted_bases.append(
+                output_dir
+                / f"{discovery.source.stem}_spatial_raft_stereo{color_suffix}_height"
+            )
+            if config.write_displacement_maps:
+                predicted_bases.append(
+                    output_dir
+                    / f"{discovery.source.stem}_spatial_raft_stereo{color_suffix}_displacement_0_to_1"
+                )
+            if config.write_raft_diagnostics:
+                predicted_bases.extend(
+                    output_dir
+                    / f"{discovery.source.stem}_spatial_raft_stereo{color_suffix}_{suffix}"
+                    for suffix in ("signed_flow", "depth_meters")
+                )
+        predicted_paths = [Path(f"{base}.exr") for base in predicted_bases]
+        if config.write_npy:
+            predicted_paths.extend(Path(f"{base}.npy") for base in predicted_bases)
+        _check_output_paths(
+            [item.final_path for item in pending] + predicted_paths + [manifest_path],
+            overwrite=config.overwrite,
+        )
+        left_image_index = int(discovery.spatial_photo["left_image_index"])
+        right_image_index = int(discovery.spatial_photo["right_image_index"])
+        left_asset_index = next(
+            (
+                index
+                for index, asset in enumerate(discovery.assets)
+                if asset.kind == "spatial_view"
+                and asset.parent_image_index == left_image_index
+            ),
+            None,
+        )
+        right_asset_index = next(
+            (
+                index
+                for index, asset in enumerate(discovery.assets)
+                if asset.kind == "spatial_view"
+                and asset.parent_image_index == right_image_index
+            ),
+            None,
+        )
+        if left_asset_index is None or right_asset_index is None:
+            raise ExtractionError("spatial-photo left/right decoded assets are missing")
+        left_array = discovery.assets[left_asset_index].array
+        right_array = discovery.assets[right_asset_index].array
+        color_matching_details: dict[str, Any] = {
+            "applied": False,
+            "policy": "disabled",
+            "raw_assets_modified": False,
+        }
+        inference_left = left_array
+        inference_right = right_array
+        height_maps: dict[str, np.ndarray] = {}
+        inference_details: dict[str, Mapping[str, Any]] = {}
+        if config.histogram_color_matching:
+            try:
+                matched_pair = histogram_match_stereo_pair(
+                    left_array,
+                    right_array,
+                    hero_side=config.color_matching_hero,
+                )
+            except ColorMatchingError as exc:
+                raise ExtractionError(str(exc)) from exc
+            inference_left = matched_pair.left
+            inference_right = matched_pair.right
+            color_matching_details = matched_pair.details
+        if config.write_stereo_matching:
+            try:
+                stereo_result = run_stereo_matching(
+                    inference_left,
+                    inference_right,
+                    discovery.spatial_photo,
+                    StereoMatchingOptions(
+                        maximum_disparity=config.stereo_maximum_disparity,
+                    ),
+                )
+            except StereoMatchingError as exc:
+                raise ExtractionError(str(exc)) from exc
+            stereo_result.details = {
+                **stereo_result.details,
+                "input_color_matching": color_matching_details,
+            }
+            height_maps["stereo_matching"] = stereo_result.height_disparity_pixels
+            inference_details["stereo_matching"] = stereo_result.details
+            pending.extend(
+                _stereo_matching_pending_outputs(
+                    output_dir,
+                    discovery,
+                    left_asset_index,
+                    stereo_result,
+                    write_npy_companions=config.write_npy,
+                    color_matched=config.histogram_color_matching,
+                )
+            )
+        if write_raft:
+            try:
+                raft_result = run_raft_stereo(
+                    inference_left,
+                    inference_right,
+                    discovery.spatial_photo,
+                    RaftStereoOptions(
+                        root=config.raft_root,
+                        model=config.raft_model,
+                        model_member=config.raft_model_member,
+                        device=config.raft_device,
+                        iterations=config.raft_iterations,
+                    ),
+                )
+            except RaftStereoError as exc:
+                raise ExtractionError(str(exc)) from exc
+            raft_result.details = {
+                **raft_result.details,
+                "input_color_matching": color_matching_details,
+            }
+            height_maps["raft_stereo"] = raft_result.height_disparity_pixels
+            inference_details["raft_stereo"] = raft_result.details
+            pending.extend(
+                _raft_pending_outputs(
+                    output_dir,
+                    discovery,
+                    left_asset_index,
+                    raft_result,
+                    write_npy_companions=config.write_npy,
+                    include_diagnostics=config.write_raft_diagnostics,
+                    color_matched=config.histogram_color_matching,
+                )
+            )
+        if config.write_displacement_maps:
+            try:
+                displacement_maps, mapping_details = normalize_height_maps_for_displacement(
+                    height_maps
+                )
+            except DisplacementMappingError as exc:
+                raise ExtractionError(str(exc)) from exc
+            for engine_name, displacement_map in displacement_maps.items():
+                pending.extend(
+                    _displacement_pending_outputs(
+                        output_dir,
+                        discovery,
+                        left_asset_index,
+                        displacement_map,
+                        engine_name=engine_name,
+                        inference_details=inference_details[engine_name],
+                        mapping_details=mapping_details,
+                        color_matched=config.histogram_color_matching,
+                        write_npy_companions=config.write_npy,
+                    )
+                )
+
     all_final_paths = [item.final_path for item in pending] + [manifest_path]
-    if len({os.path.normcase(str(path)) for path in all_final_paths}) != len(all_final_paths):
-        raise ExtractionError("generated output names collide")
-    collisions = [path for path in all_final_paths if path.exists()]
-    if collisions and not config.overwrite:
-        joined = ", ".join(path.name for path in collisions[:5])
-        if len(collisions) > 5:
-            joined += f", and {len(collisions) - 5} more"
-        raise ExtractionError(f"output already exists (use --overwrite): {joined}")
+    _check_output_paths(all_final_paths, overwrite=config.overwrite)
 
     created_temps: list[Path] = []
     try:
