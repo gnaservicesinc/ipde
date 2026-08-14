@@ -1,0 +1,5 @@
+/opt/ipde/ipde/build/CMakeFiles/ipde_gui.dir
+/opt/ipde/ipde/build/CMakeFiles/edit_cache.dir
+/opt/ipde/ipde/build/CMakeFiles/rebuild_cache.dir
+/opt/ipde/ipde/build/CMakeFiles/ipde_gui_autogen_timestamp_deps.dir
+/opt/ipde/ipde/build/CMakeFiles/ipde_gui_autogen.dir

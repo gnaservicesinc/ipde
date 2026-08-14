@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/opt/ipde/ipde/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
