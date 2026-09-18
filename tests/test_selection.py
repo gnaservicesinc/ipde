@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 import numpy as np
+import OpenEXR
 
 from ipde.cli import main
 from ipde.extractor import Asset, Discovery, ExtractOptions, ExtractionError, extract_file, inspect_file
@@ -30,7 +31,7 @@ class SelectionTests(unittest.TestCase):
             Asset("spatial_view", 1, 0, rgb, "RGB", 8, "spatial_left"),
             Asset("spatial_view", 2, 0, rgb, "RGB", 8, "spatial_right"),
         ], spatial_photo={"left_image_index": 1, "right_image_index": 2,
-                          "rectified_stereo_ready": True,
+                          "rectified_stereo_ready": True, "focal_length_pixels_for_depth": 10.0, "baseline_meters": .1,
                           "left_camera": {"width": 3, "height": 2}})
         self.patcher = patch("ipde.extractor.discover_file", return_value=self.discovery)
         self.patcher.start()
@@ -61,7 +62,12 @@ class SelectionTests(unittest.TestCase):
         stereo.assert_not_called()
         self.assertEqual(self.files(), {"photo_spatial_raft_stereo_displacement_0_to_1.exr"})
         result = read_exr_exact(self.directory / "out/photo_spatial_raft_stereo_displacement_0_to_1.exr", (2, 3))
-        np.testing.assert_array_equal(result, np.array([[0, .2, .4], [.6, .8, 1]], dtype=np.float32))
+        depth = np.float32(1) / self.height
+        np.testing.assert_array_equal(result, (depth.max() - depth) / (depth.max() - depth.min()))
+        with OpenEXR.File(str(self.directory / "out/photo_spatial_raft_stereo_displacement_0_to_1.exr")) as image:
+            self.assertIn("ipdeDepthBoundsMeters", image.header())
+            self.assertIn("ipdeDisplacementScaleMeters", image.header())
+            self.assertIn('"normalization": true', image.header()["ipdeDerivation"])
 
     def test_raw_raft_height_stays_in_pixels(self):
         with patch("ipde.extractor.run_raft_stereo", return_value=self.raft):
@@ -96,10 +102,31 @@ class SelectionTests(unittest.TestCase):
         self.assertGreater(len(np.unique(result)), 2)
 
     def test_independent_exports_do_not_collide_on_manifest(self):
-        first = self.export("raw:0")
-        second = self.export("raw:1")
+        first = self.export("raw:0", write_manifest=True)
+        second = self.export("raw:1", write_manifest=True)
         self.assertNotEqual(first["manifest_path"], second["manifest_path"])
         self.assertEqual(self.files(), {"photo_depth.png", "photo_hdr_gain_map.png"})
+
+    def test_manifest_is_opt_in_and_existing_manifest_is_untouched(self):
+        out = self.directory / "out"
+        out.mkdir()
+        existing = out / "photo_aux_manifest.json"
+        existing.write_bytes(b"previous report")
+        report = self.export("raw:0")
+        self.assertIsNone(report["manifest_path"])
+        self.assertEqual(existing.read_bytes(), b"previous report")
+        self.assertEqual({p.name for p in out.iterdir()}, {existing.name, "photo_depth.png"})
+
+    def test_default_export_writes_no_json(self):
+        report = self.export("raw:0")
+        self.assertIsNone(report["manifest_path"])
+        self.assertEqual({p.name for p in (self.directory / "out").iterdir()}, {"photo_depth.png"})
+
+    def test_cli_manifest_is_explicit(self):
+        for extra, expected in (([], False), (["--manifest"], True)):
+            with patch("ipde.cli.extract_file", return_value={}) as extract, patch("builtins.print"):
+                self.assertEqual(main([str(self.source), "--json", *extra]), 0)
+            self.assertEqual(extract.call_args.args[1].write_manifest, expected)
 
     def test_invalid_selection_is_rejected_before_any_output(self):
         with patch("ipde.extractor.run_raft_stereo") as raft:

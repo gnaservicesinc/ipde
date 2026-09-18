@@ -27,6 +27,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", type=Path, help="output directory (default: each source directory)")
     parser.add_argument("--overwrite", action="store_true", help="replace colliding outputs after verification")
     parser.add_argument("--no-npy", action="store_true", help="omit exact NumPy array companions")
+    parser.add_argument("--manifest", action="store_true", help="also write a provenance JSON manifest (off by default)")
     parser.add_argument(
         "--no-metric-depth",
         action="store_true",
@@ -52,7 +53,7 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "also export explicit float32 0..1 displacement derivatives using the "
-            "full range per map"
+            "full linear-depth range per map"
         ),
     )
     parser.add_argument(
@@ -143,7 +144,7 @@ def _human_report(report: dict, inspected: bool) -> str:
             lines.append(f"    {output['role']}: {output['path']}")
     for warning in report.get("warnings", []):
         lines.append(f"Warning: {warning}")
-    if not inspected:
+    if not inspected and report.get("manifest_path"):
         lines.append(f"Manifest: {report['manifest_path']}")
     return "\n".join(lines)
 
@@ -162,6 +163,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         selected_products=tuple(args.select) if args.select is not None else None,
                         output_dir=args.output_dir,
                         write_npy=not args.no_npy,
+                        write_manifest=args.manifest,
                         write_metric_depth=not args.no_metric_depth,
                         write_physical_disparity=not args.no_physical_disparity,
                         write_stereo_matching=(

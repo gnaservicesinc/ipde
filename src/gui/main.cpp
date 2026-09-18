@@ -134,6 +134,9 @@ public:
         auto *options = new QHBoxLayout;
         exactNpy_ = new QCheckBox(QStringLiteral("Write exact .npy companions"), central);
         exactNpy_->setChecked(false);
+        manifest_ = new QCheckBox(QStringLiteral("Write JSON manifest"), central);
+        manifest_->setChecked(false);
+        manifest_->setToolTip(QStringLiteral("Optional provenance report with calibration, hashes, and extraction details."));
         colorMatching_ = new QCheckBox(QStringLiteral("Color Matching"), central);
         colorMatching_->setChecked(false);
         colorMatching_->setToolTip(QStringLiteral(
@@ -155,6 +158,7 @@ public:
             "Automatic prefers Apple Metal on this Mac and falls back to CPU only when Metal is unavailable."));
         overwrite_ = new QCheckBox(QStringLiteral("Replace existing outputs"), central);
         options->addWidget(exactNpy_);
+        options->addWidget(manifest_);
 
         options->addWidget(overwrite_);
         options->addStretch();
@@ -204,7 +208,7 @@ public:
         });
         auto *help = new QLabel(QStringLiteral(
             "Check individual outputs, then Export checked. Or select one row and click Export this map. "
-            "For a 0–1 height input choose RAFT height — 0–1 displacement. Raw pixel disparity can look white "
+            "For physical relief choose RAFT linear depth — 0–1 displacement. Raw pixel disparity is inverse depth and can look white "
             "in a 0–1 viewer; unmatched classical pixels remain NaN."), central);
         help->setWordWrap(true);
         root->addWidget(help);
@@ -436,6 +440,7 @@ private:
             if (!exactNpy_->isChecked()) {
                 arguments << QStringLiteral("--no-npy");
             }
+            if (manifest_->isChecked()) arguments << QStringLiteral("--manifest");
             for (const auto &id : selectedProducts_.value(current_))
                 arguments << QStringLiteral("--select") << id;
             arguments << QStringLiteral("--raft-device") << raftDevice_->currentData().toString();
@@ -528,10 +533,11 @@ private:
                             .arg(spatial.value(QStringLiteral("disparity_adjustment_fraction_of_width")).toDouble() * 100.0, 0, 'f', 4));
                 }
                 if (!inspectOnly_) {
-                    log_->append(QStringLiteral("%1: wrote %2 verified file(s); manifest %3")
+                    log_->append(QStringLiteral("%1: wrote %2 verified file(s)")
                                      .arg(QFileInfo(current_).fileName())
-                                     .arg(outputCount)
-                                     .arg(object.value(QStringLiteral("manifest_path")).toString()));
+                                     .arg(outputCount));
+                    const auto manifestPath = object.value(QStringLiteral("manifest_path")).toString();
+                    if (!manifestPath.isEmpty()) log_->append(QStringLiteral("Manifest: %1").arg(manifestPath.toHtmlEscaped()));
                 }
             }
         }
@@ -562,6 +568,7 @@ private:
         cancel_->setEnabled(running_);
         output_->setEnabled(!running_);
         exactNpy_->setEnabled(!running_);
+        manifest_->setEnabled(!running_);
         colorMatching_->setEnabled(!running_);
         colorHero_->setEnabled(!running_ && colorMatching_->isChecked());
         raftDevice_->setEnabled(!running_);
@@ -584,6 +591,7 @@ private:
     QString singleSource_;
     QString singleProduct_;
     QCheckBox *exactNpy_ = nullptr;
+    QCheckBox *manifest_ = nullptr;
     QCheckBox *colorMatching_ = nullptr;
     QComboBox *colorHero_ = nullptr;
     QComboBox *raftDevice_ = nullptr;

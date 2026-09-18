@@ -701,6 +701,137 @@ def _stereo_search_range(width: int, requested: int | None) -> int:
     return disparities
 
 
+def register_stereo_rows(
+    left: np.ndarray, right: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Correct small, evidenced vertical registration errors for inference only.
+
+    Fit y_left = a*x_right + b*y_right + c; x_right is never changed.
+    A general homography would also alter horizontal disparity and invalidate
+    the supplied focal length/baseline. Keep the left reference and raw assets.
+    """
+    import cv2
+
+    height, width = left.shape[:2]
+    valid = np.ones((height, width), dtype=bool)
+    details: dict[str, Any] = {
+        "applied": False, "raw_assets_modified": False,
+        "horizontal_coordinates_changed": False, "reference_view": "left",
+        "method": "SIFT ratio matches; deterministic RANSAC vertical affine fit",
+        "reason": "insufficient well-distributed feature support",
+    }
+    detector = cv2.SIFT_create(nfeatures=8000)
+    key_l, desc_l = detector.detectAndCompute(cv2.cvtColor(left, cv2.COLOR_RGB2GRAY), None)
+    key_r, desc_r = detector.detectAndCompute(cv2.cvtColor(right, cv2.COLOR_RGB2GRAY), None)
+    if desc_l is None or desc_r is None or len(desc_r) < 2:
+        return right, valid, details
+    pairs = cv2.BFMatcher().knnMatch(desc_l, desc_r, k=2)
+    # Reject ambiguous descriptors and duplicate target features.
+    matches = sorted((p[0] for p in pairs if len(p) == 2 and p[0].distance < .65 * p[1].distance),
+                     key=lambda m: m.distance)
+    unique: dict[int, Any] = {}
+    for match in matches:
+        unique.setdefault(match.trainIdx, match)
+    if len(unique) < 16:
+        return right, valid, details
+    pl = np.array([key_l[m.queryIdx].pt for m in unique.values()], dtype=np.float64)
+    pr = np.array([key_r[m.trainIdx].pt for m in unique.values()], dtype=np.float64)
+    max_shift = max(8.0, height * .01)
+    keep = (np.abs(pl[:, 1] - pr[:, 1]) < max_shift) & (np.abs(pl[:, 0] - pr[:, 0]) < width * .5)
+    pl, pr = pl[keep], pr[keep]
+    details["feature_match_count"] = len(pl)
+    if len(pl) < 16:
+        return right, valid, details
+    design = np.column_stack((pr[:, 0] / width, pr[:, 1] / height, np.ones(len(pr))))
+    delta = pl[:, 1] - pr[:, 1]
+    best = np.zeros(len(pr), dtype=bool)
+    generator = np.random.default_rng(0)
+    for _ in range(512):
+        indices = generator.choice(len(pr), 3, replace=False)
+        try:
+            fit = np.linalg.solve(design[indices], delta[indices])
+        except np.linalg.LinAlgError:
+            continue
+        inliers = np.abs(design @ fit - delta) < 1.0
+        if np.count_nonzero(inliers) > np.count_nonzero(best):
+            best = inliers
+    count = int(np.count_nonzero(best))
+    if count < max(16, math.ceil(.6 * len(pr))):
+        return right, valid, details
+    if np.any(np.ptp(pr[best], axis=0) < np.array([width, height]) * .25):
+        return right, valid, details
+    fit = np.linalg.lstsq(design[best], delta[best], rcond=None)[0]
+    residual = np.abs(design[best] @ fit - delta[best])
+    corners = np.array([[0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]]) @ fit
+    details.update({
+        "inlier_count": count,
+        "median_vertical_error_before_pixels": float(np.median(np.abs(delta[best]))),
+        "median_vertical_error_after_pixels": float(np.median(residual)),
+        "p90_vertical_error_after_pixels": float(np.percentile(residual, 90)),
+    })
+    if (np.max(np.abs(corners)) > max_shift or abs(fit[0] / width) > .01
+            or abs(fit[1] / height) > .01 or np.median(residual) > .5):
+        details["reason"] = "vertical fit exceeded the residual or small-correction limit"
+        return right, valid, details
+    if np.max(np.abs(corners)) < .25:
+        details["reason"] = "already aligned within a quarter pixel"
+        return right, valid, details
+    matrix = np.array([[1., 0., 0.], [fit[0] / width, 1. + fit[1] / height, fit[2]]])
+    aligned = cv2.warpAffine(right, matrix, (width, height), flags=cv2.INTER_LINEAR,
+                             borderMode=cv2.BORDER_REPLICATE)
+    # Only accept correspondences whose interpolation footprint is in the source.
+    yy, xx = np.indices((height, width), dtype=np.float32)
+    source_y = (yy - matrix[1, 0] * xx - matrix[1, 2]) / matrix[1, 1]
+    valid = (source_y >= 0) & (source_y <= height - 1)
+    details.update({
+        "applied": True, "reason": "measured vertical misregistration",
+        "right_to_aligned_affine": matrix.tolist(),
+        "interpolation": "OpenCV INTER_LINEAR; uint8 inference input only",
+        "invalid_border_pixels": int(np.count_nonzero(~valid)),
+    })
+    return aligned, valid, details
+
+
+def correspondence_validity(signed_flow: np.ndarray, right_valid: np.ndarray) -> np.ndarray:
+    """Reject off-image matches and interpolation across invalid registered borders."""
+    height, width = signed_flow.shape
+    xr = np.arange(width, dtype=np.float32)[None, :] + signed_flow
+    valid = np.isfinite(xr) & (xr >= 0) & (xr <= width - 1)
+    safe_x = np.where(valid, xr, 0)
+    lo = np.floor(safe_x).astype(np.intp)
+    hi = np.ceil(safe_x).astype(np.intp)
+    rows = np.arange(height)[:, None]
+    return valid & right_valid[rows, lo] & right_valid[rows, hi]
+
+
+def linear_depth_displacement(
+    disparity: np.ndarray, spatial: Mapping[str, Any],
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Explicit near-high 0..1 derivative, linear in camera-axis distance, not 1/Z."""
+    _, depth = derive_raft_height_and_depth(-disparity, {
+        **spatial, "principal_point_delta_x_pixels": 0.0,
+    })
+    finite = np.isfinite(depth) & (depth > 0)
+    if not np.any(finite):
+        raise DisplacementMappingError("no finite positive depth for linear displacement")
+    near, far = np.min(depth[finite]), np.max(depth[finite])
+    span = np.float32(far - near)
+    mapped = np.full(depth.shape, np.nan, dtype=np.float32)
+    mapped[finite] = (far - depth[finite]) / (span if span > 0 else np.float32(1))
+    details = {
+        "policy": "explicit linear camera-axis depth mapping",
+        "source_units": "pixels", "intermediate_units": "meters", "output_units": "normalized 0..1",
+        "formula": "Z = float32(focal_px * baseline_m) / disparity; (far_m - Z) / (far_m - near_m)",
+        "near_depth_meters_float32": float(near), "far_depth_meters_float32": float(far),
+        "displacement_scale_meters_float32": float(span),
+        "constant_map": bool(span == 0), "finite_input_count": int(np.count_nonzero(finite)),
+        "nonfinite_policy": "nonpositive disparity and nonfinite depth remain NaN; no hole filling",
+        "scientific_pixel_disparity_replaced": False,
+        "precision_scope": "Explicit float32 derivative; linear in Z, preserves finite range without percentile clipping",
+    }
+    return mapped, details
+
+
 def run_stereo_matching(
     left: np.ndarray,
     right: np.ndarray,
@@ -726,6 +857,8 @@ def run_stereo_matching(
             "classical stereo matching requires opencv-python-headless>=4.13"
         ) from exc
 
+    right_array, right_valid, registration = register_stereo_rows(left_array, right_array)
+
     channels = int(left_array.shape[2])
     block_area = settings.block_size * settings.block_size
     parameters = {
@@ -744,6 +877,10 @@ def run_stereo_matching(
     try:
         matcher = cv2.StereoSGBM.create(**parameters)
         fixed_disparity = np.asarray(matcher.compute(left_array, right_array))
+        # OpenCV's disp12 check reuses the forward cost; independently match
+        # the reverse pair as well. Flipping keeps the same positive search range.
+        reverse_fixed = matcher.compute(np.ascontiguousarray(right_array[:, ::-1]),
+                                        np.ascontiguousarray(left_array[:, ::-1]))[:, ::-1]
     except Exception as exc:
         raise StereoMatchingError(
             "OpenCV StereoSGBM failed at full "
@@ -759,6 +896,16 @@ def run_stereo_matching(
     disparity = np.ascontiguousarray(
         fixed_disparity.astype(np.float32) / np.float32(16.0), dtype=np.float32
     )
+    reverse = reverse_fixed.astype(np.float32) / np.float32(16.0)
+    xr = np.arange(disparity.shape[1], dtype=np.float32)[None, :] - disparity
+    # Conservative check of both bracketing pixels; no averaging through a
+    # depth discontinuity and no modification of accepted 1/16-pixel estimates.
+    lo = np.clip(np.floor(xr), 0, disparity.shape[1] - 1).astype(np.intp)
+    hi = np.clip(np.ceil(xr), 0, disparity.shape[1] - 1).astype(np.intp)
+    rows = np.arange(disparity.shape[0])[:, None]
+    rev_lo, rev_hi = reverse[rows, lo], reverse[rows, hi]
+    consistent = ((rev_lo >= 0) & (rev_hi >= 0)
+                  & (np.abs(disparity - rev_lo) <= 1) & (np.abs(disparity - rev_hi) <= 1))
     try:
         principal_point_delta = np.float32(spatial["principal_point_delta_x_pixels"])
     except (KeyError, TypeError, ValueError, OverflowError) as exc:
@@ -768,7 +915,14 @@ def run_stereo_matching(
     height = np.ascontiguousarray(
         disparity + principal_point_delta, dtype=np.float32
     )
-    height[~valid | (height < 0)] = np.float32(np.nan)
+    in_bounds = correspondence_validity(-disparity, right_valid)
+    accepted = valid & (height >= 0) & in_bounds & consistent
+    # Consistency rejection can split formerly connected false matches into
+    # islands. Filter *after* that rejection, retaining accepted codes exactly.
+    checked_fixed = np.where(accepted, fixed_disparity, invalid_fixed_value).astype(np.int16)
+    cv2.filterSpeckles(checked_fixed, int(invalid_fixed_value), 200, 32)
+    supported = checked_fixed > invalid_fixed_value
+    height[~supported] = np.float32(np.nan)
     finite = np.isfinite(height)
     valid_count = int(np.count_nonzero(finite))
     details = {
@@ -783,6 +937,15 @@ def run_stereo_matching(
         "color_conversion": False,
         "gamma_correction": False,
         "normalization": False,
+        "vertical_registration": registration,
+        "out_of_view_pixel_count": int(np.count_nonzero(~in_bounds)),
+        "left_right_consistency": "independent reverse match; both neighbors within 1 pixel",
+        "inconsistent_pixel_count": int(np.count_nonzero(valid & ~consistent)),
+        "post_consistency_speckle_filter": {
+            "maximum_component_pixels": 200, "neighbor_disparity_difference_pixels": 2,
+            "rejected_pixel_count": int(np.count_nonzero(accepted & ~supported)),
+            "policy": "reject small disconnected disparity components as NaN; never smooth or fill",
+        },
         "parameters": {
             **parameters,
             "mode": "STEREO_SGBM_MODE_SGBM_3WAY",
@@ -856,6 +1019,7 @@ def run_raft_stereo(
     left_array, right_array = _validate_raft_inputs(
         left, right, spatial, options.iterations
     )
+    right_array, right_valid, registration = register_stereo_rows(left_array, right_array)
     root, model_path, model_member = resolve_raft_resources(options)
     checkpoint_bytes, checkpoint_name = _checkpoint_bytes(model_path, model_member)
     checkpoint_sha256 = hashlib.sha256(checkpoint_bytes).hexdigest()
@@ -965,6 +1129,9 @@ def run_raft_stereo(
         ) from exc
 
     height_disparity, depth_meters = derive_raft_height_and_depth(signed_flow, spatial)
+    in_bounds = correspondence_validity(signed_flow, right_valid)
+    height_disparity[~in_bounds] = np.float32(np.nan)
+    depth_meters[~in_bounds] = np.float32(np.nan)
     principal_point_delta = np.float32(spatial["principal_point_delta_x_pixels"])
     focal_length = np.float32(spatial["focal_length_pixels_for_depth"])
     baseline = np.float32(spatial["baseline_meters"])
@@ -988,6 +1155,8 @@ def run_raft_stereo(
         "output_dtype": signed_flow.dtype.name,
         "full_decoded_resolution": True,
         "resized_or_tiled": False,
+        "vertical_registration": registration,
+        "out_of_view_pixel_count": int(np.count_nonzero(~in_bounds)),
         "signed_flow_semantics": "horizontal x_right - x_left correspondence displacement in pixels",
         "height_map_formula": "(cx_right - cx_left) - signed_flow_pixels; negative/nonfinite is NaN",
         "height_map_units": "pixels",

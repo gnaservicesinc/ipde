@@ -300,16 +300,9 @@ class ExtractorTests(unittest.TestCase):
                     height,
                 )
             )
-            expected_stereo_displacement = np.clip(
-                (stereo_height - np.float32(1.0)) / np.float32(5.0),
-                np.float32(0.0),
-                np.float32(1.0),
-            ).astype(np.float32)
-            expected_raft_displacement = np.clip(
-                (height - np.float32(1.0)) / np.float32(5.0),
-                np.float32(0.0),
-                np.float32(1.0),
-            ).astype(np.float32)
+            stereo_depth = np.float32(5.0) / stereo_height
+            expected_stereo_displacement = (np.float32(5.0) - stereo_depth) / (np.float32(5.0) - np.float32(5.0 / 6.0))
+            expected_raft_displacement = (np.float32(5.0) - depth) / (np.float32(5.0) - np.float32(5.0 / 6.0))
             self.assertTrue(
                 arrays_bit_equal(
                     read_exr_exact(
@@ -382,10 +375,8 @@ class ExtractorTests(unittest.TestCase):
                 if output["role"] == "derived_raft_stereo_displacement_0_to_1"
             )
             mapping = displacement_output["derivation"]["displacement_mapping"]
-            self.assertEqual(
-                mapping["shared_bounds_across_maps"],
-                ["raft_stereo"],
-            )
+            self.assertEqual(mapping["far_depth_meters_float32"], 5.0)
+            self.assertAlmostEqual(mapping["near_depth_meters_float32"], 5.0 / 6.0)
             self.assertFalse(mapping["scientific_pixel_disparity_replaced"])
             diagnostic_roles = [
                 output["role"] for output in diagnostic_report["assets"][0]["outputs"]
@@ -569,7 +560,7 @@ class ExtractorTests(unittest.TestCase):
             output = root / "output"
             source.write_bytes(b"fake-heif")
             with patch("ipde.extractor.pillow_heif.open_heif", return_value=fixture_file()):
-                report = extract_file(source, ExtractOptions(output_dir=output))
+                report = extract_file(source, ExtractOptions(output_dir=output, write_manifest=True))
 
             depth_png = output / "photo.edit_depth.png"
             depth_npy = output / "photo.edit_depth.npy"
