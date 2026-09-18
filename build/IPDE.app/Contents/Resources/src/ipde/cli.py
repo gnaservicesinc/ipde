@@ -21,6 +21,7 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("sources", nargs="+", type=Path, help="HEIC/HEIF input file(s)")
+    parser.add_argument("--select", action="append", metavar="PRODUCT_ID", help="export only this product (repeatable; IDs are in --inspect --json)")
     parser.add_argument("--inspect", action="store_true", help="inventory assets without writing output files")
     parser.add_argument("--json", action="store_true", help="emit one JSON object per source")
     parser.add_argument("--output-dir", type=Path, help="output directory (default: each source directory)")
@@ -50,8 +51,8 @@ def _parser() -> argparse.ArgumentParser:
         "--displacement-maps",
         action="store_true",
         help=(
-            "also export explicit float32 0..1 displacement derivatives using one shared "
-            "robust range"
+            "also export explicit float32 0..1 displacement derivatives using the "
+            "full range per map"
         ),
     )
     parser.add_argument(
@@ -158,6 +159,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 report = extract_file(
                     source,
                     ExtractOptions(
+                        selected_products=tuple(args.select) if args.select is not None else None,
                         output_dir=args.output_dir,
                         write_npy=not args.no_npy,
                         write_metric_depth=not args.no_metric_depth,

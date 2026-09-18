@@ -88,9 +88,9 @@ The raw arrays are not rotated for display. They stay in the stored coordinate
 system to remain registered with the camera intrinsics; the EXIF orientation is
 recorded in the manifest.
 
-Selecting **Compare Stereo Matching + RAFT-Stereo height maps** in the GUI, or
-passing `--stereo-comparison`, creates two directly comparable, full-resolution,
-near-is-high float32 height maps:
+The GUI lists RAFT and classical stereo as separate selectable outputs. The CLI
+option `--stereo-comparison` exports both full-resolution near-is-high float32
+pixel-disparity maps:
 
 - `<name>_spatial_stereo_matching_height.exr` uses OpenCV StereoSGBM, a classical
   semi-global block matcher. It consumes the decoded RGB codes directly without
@@ -109,7 +109,7 @@ does not resize or tile either view, and defaults to the Middlebury checkpoint,
 which the upstream project recommends for in-the-wild images. Automatic device
 selection prefers CUDA, then Apple Metal (MPS), then CPU.
 
-The GUI enables **Color Matching** by default for this comparison. The selected
+The GUI offers **Color Matching** as an opt-in inference preprocessing step. The selected
 Hero view (left by default) remains unchanged. IPDE constructs three monotone
 256-entry lookup tables from its RGB channel CDFs and applies them to the other
 view before either matcher runs. Raw extracted left/right PNG and NPY arrays are
@@ -129,7 +129,8 @@ specialist diagnostic EXRs. All are read back bit-for-bit before commit:
 
 ```text
 signed_flow = RAFT(left, right)                   # x_right - x_left, pixels
-height = abs(signed_flow + (cx_right - cx_left)) # near is generally high
+height = (cx_right - cx_left) - signed_flow    # near is generally high
+height[height < 0] = NaN                       # invalid correspondence, not abs()
 depth_meters = float32(focal_px * baseline_m) / height
 ```
 
@@ -151,21 +152,24 @@ converting a disparity EXR to integer PNG without an explicit display range ofte
 turns every positive value into white and every `NaN` into black. That PNG is a
 clipped validity mask, not a faithful rendering of the height values.
 
-For software that insists on a `0..1` displacement range, enable **0–1
-displacement maps** in the GUI or pass `--displacement-maps`. IPDE then writes
+For software that expects a `0..1` displacement range, select **RAFT height —
+0–1 displacement** (or its classical counterpart) in the GUI. CLI users can
+select it with `--select raft-displacement --no-npy`, or add it to legacy exports
+with `--displacement-maps`. IPDE then writes
 separately named full-resolution float32 derivatives:
 
 - `<name>_spatial_stereo_matching_displacement_0_to_1.exr`
 - `<name>_spatial_raft_stereo_displacement_0_to_1.exr`
 
-IPDE pools the finite pixel-disparity samples from every selected matcher, finds
-one shared 1st–99th percentile range, and applies
-`clip((height - lower) / (upper - lower), 0, 1)` to both maps. Sharing the exact
-recorded bounds makes the StereoSGBM and RAFT results visually comparable rather
-than independently auto-scaling them. Near remains high. StereoSGBM `NaN` pixels
-remain `NaN` because they are genuinely unmatched; RAFT is normally dense. The
-original `_height.exr` and `.npy` pixel-disparity products are retained unchanged,
-so this convenient normalization never replaces the scientific algorithm output.
+Each displacement map uses its own finite minimum and maximum and applies
+`(height - minimum) / (maximum - minimum)` in float32. No percentile tails are
+clipped by default, and a classical result cannot squash the contrast of the
+RAFT result. Constant finite maps become zero; NaN remains NaN. The exact range
+and formula are recorded in the EXR and manifest. These optional derivatives
+change units and incur float32 rounding; the raw pixel-disparity product remains
+available separately and is never changed by requesting a displacement map.
+Independent scales mean normalized maps must not be compared numerically across
+matchers; compare the raw pixel-disparity maps for that purpose.
 
 Apple encodes disparity adjustment as a signed integer in `[-10000, 10000]`,
 mapping to `[-1, +1]` times image width. It controls the presentation zero-parallax
@@ -214,7 +218,8 @@ SciPy, and opt_einsum. OpenEXR is installed so floating-point data can never be
 silently downgraded.
 
 RAFT inference also needs an upstream RAFT-Stereo checkout and checkpoint. IPDE
-auto-detects the supplied sibling paths `../RAFT-Stereo` and `../models.zip`.
+auto-detects the supplied sibling paths `../RAFT-Stereo`,
+`../models/raftstereo-middlebury.pth`, and `../models.zip`.
 For another layout, pass `--raft-root` and `--raft-model`, or set
 `IPDE_RAFT_STEREO_DIR` and `IPDE_RAFT_MODEL`. A ZIP model source defaults to the
 `raftstereo-middlebury.pth` member; `--raft-model-member` selects another supplied
@@ -250,14 +255,15 @@ Export matching classical and RAFT-Stereo height maps with Apple Metal:
 Useful options:
 
 ```text
---inspect       Inventory and decode auxiliary planes without writing files
+--inspect       Inventory planes and available product IDs without writing files
+--select ID     Export only this product; repeat to select more (see --inspect --json)
 --json          Emit one machine-readable JSON object per input file
 --overwrite     Atomically replace colliding output files
 --no-npy        Omit exact-array companions (PNG/EXR remain verified and lossless)
 --no-metric-depth  Omit calibrated float32 distance in meters
 --no-physical-disparity  Omit calibrated float32 disparity in inverse meters
 --stereo-comparison  Export StereoSGBM and RAFT-Stereo height maps together
---displacement-maps  Also export shared-range float32 0..1 displacement maps
+--displacement-maps  Also export per-map full-range float32 0..1 displacement maps
 --stereo-matching  Export only the classical full-resolution height map
 --stereo-max-disparity PIXELS  Override the classical disparity search range
 --color-matching  Match the non-Hero view's RGB histograms before inference
@@ -282,18 +288,44 @@ make gui
 ```
 
 Files may be added with the picker or drag-and-drop. IPDE inventories them first,
-showing every depth, auxiliary, alpha, and spatial-view plane with its dimensions,
-dtype, and source bit depth. Spatial Photos are labeled with their left/right
-indices, baseline, and disparity adjustment. Extraction runs one source at a time
-to keep peak memory use bounded. Metric-depth EXR calibration is enabled by
-default and can be toggled independently from calibrated disparity. Spatial
-comparison is opt-in and writes one classical Stereo Matching height map plus
-one RAFT-Stereo height map. Color Matching is enabled for that comparison by
-default, with explicit Left Hero and Right Hero choices. Explicit 0–1
-displacement derivatives are also enabled by default; unchecking that option
-leaves only the scientific pixel-disparity maps. Automatic, Apple Metal, and CPU
-RAFT device choices are available. The output folder may be left blank to write
-beside each source.
+listing each available output with dimensions and precision. Select one row and
+click **Export this map**, or check multiple rows and click **Export checked**.
+Only those products are written; RAFT-only exports do not run classical matching
+or write stereo RGB views, gain maps, diagnostics, or other unselected products.
+**Write exact .npy companions** is off by default. PNG/EXR exports are still
+lossless and verified bit-for-bit. A provenance manifest is always included;
+its selection-specific name allows separate exports to the same folder.
+
+Depth source samples, calibrated disparity, and metric distance are separate
+choices. Spatial photos additionally offer RAFT and classical pixel-disparity
+height maps, optional 0–1 displacement maps, and RAFT flow/distance diagnostics.
+Raw pixel-disparity EXRs can look white in a viewer restricted to 0–1. Choose the
+explicit 0–1 product for that workflow; unmatched classical regions remain NaN
+and may display black. No smoothing or invented hole filling is applied.
+
+Use **RAFT model: Choose…** to select a `.pth`, `.pt`, or `.zip` checkpoint, and
+**RAFT source folder: Choose…** if automatic source lookup fails. The source
+folder must contain `core/raft_stereo.py`. For a ZIP, the optional member field
+selects the checkpoint (default `raftstereo-middlebury.pth`); nested archive
+folders are supported. These paths persist between launches. Explicit invalid
+paths report an error instead of silently selecting a different model. Use the
+original upstream checkpoint filename to identify its model architecture.
+
+Color Matching is opt-in. It changes only inference inputs. The output folder
+may be left blank to write beside each source, and extraction runs one source at
+a time to bound peak memory use.
+
+CLI examples for exporting a single product:
+
+```sh
+.venv/bin/python ipde_extract.py --inspect --json portrait.heic
+.venv/bin/python ipde_extract.py --select raw:0 --no-npy portrait.heic
+.venv/bin/python ipde_extract.py --select raft-displacement --no-npy \
+  --raft-model /path/to/raftstereo-middlebury.pth spatial.heic
+```
+
+Use the actual raw ID from the inventory; `raw:0` is only an example. With no
+`--select`, the CLI preserves its legacy full-extraction behavior.
 
 Build without launching:
 
@@ -318,29 +350,17 @@ ordering, source-quantization accounting, Apple stereo-group validation,
 presentation-versus-geometric disparity semantics, full-resolution StereoSGBM
 with explicit unmatched pixels, exact per-channel histogram LUT construction and
 raw-view isolation, exact RAFT float32 derivation, comparison-only versus
-diagnostic RAFT output integration, shared-range float32 displacement mapping,
+diagnostic RAFT output integration, per-map float32 displacement mapping,
+selective exports, explicit-path failures, and nested checkpoint ZIPs,
 resource resolution, and CLI behavior.
 
-The supplied `IMG_6942.HEIC` was also exercised end-to-end at its full
-2688x2016 stereo resolution with the supplied Middlebury checkpoint, 32 recurrent
-updates, and Apple Metal. The comparison height EXRs passed exact read-back
-verification; optional RAFT diagnostics use the same verified output path.
-
-`IMG_6979.HEIC` was validated through the complete left-Hero Color Matching path.
-The right-view RGB means changed from approximately `(110.72, 137.72, 142.26)` to
-`(136.77, 133.45, 131.36)`, closely matching the left Hero's
-`(136.73, 133.47, 131.41)`, while the raw exported views remained bit-identical.
-StereoSGBM finite coverage increased modestly from 63.31% to 63.95%; this confirms
-that its visible color cast was real but was not the main source of the attached
-black/white PNG artifact. The color-matched StereoSGBM and RAFT EXRs both passed
-exact read-back verification.
-
-`IMG_6998.HEIC` reproduced the apparent two-color failure in a `0..1`-clipping
-viewer even though its scientific StereoSGBM map contained 3,352 distinct finite
-pixel-disparity values. With the shared recorded range of approximately
-`31.411194..65.9375` pixels, the new displacement EXRs contain 554 distinct finite
-StereoSGBM levels and 3,729,527 RAFT levels. Both span `0..1` and passed exact EXR
-read-back verification; the RAFT map has no nonfinite pixels.
+Earlier versions were exercised on several full-resolution spatial photos, but
+those files are not part of the repository. For current validation, run the test
+suite and use your own spatial photo to assess correspondence quality. Synthetic
+known-shift tests distinguish the disparity sign and calibration math from
+viewer clipping; float32 EXR round trips verify stored data independently of a
+viewer. A precision-preserving export does not guarantee accurate inferred
+geometry in untextured or occluded regions.
 
 ## Output naming
 

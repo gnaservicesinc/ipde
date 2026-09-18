@@ -255,6 +255,10 @@ def _candidate_ancestors() -> list[Path]:
 
 
 def resolve_raft_resources(options: RaftStereoOptions) -> tuple[Path, Path, str | None]:
+    if options.root is not None and not (options.root.expanduser() / "core" / "raft_stereo.py").is_file():
+        raise RaftStereoError(f"Selected RAFT-Stereo source is invalid: {options.root}")
+    if options.model is not None and not options.model.expanduser().is_file():
+        raise RaftStereoError(f"Selected RAFT-Stereo model does not exist: {options.model}")
     root_candidates: list[Path] = []
     if options.root is not None:
         root_candidates.append(options.root.expanduser())
@@ -316,7 +320,12 @@ def _checkpoint_bytes(model: Path, member: str | None) -> tuple[bytes, str]:
         raise RaftStereoError("a checkpoint member is required when --raft-model names a ZIP archive")
     try:
         with zipfile.ZipFile(model) as archive:
-            info = archive.getinfo(member)
+            matches = [name for name in archive.namelist() if name == member]
+            if not matches:
+                matches = [name for name in archive.namelist() if Path(name).name == member]
+            if len(matches) != 1:
+                raise RaftStereoError(f"Checkpoint {member!r} is missing or ambiguous in {model}")
+            info = archive.getinfo(matches[0])
             if info.is_dir() or info.file_size <= 0 or info.file_size > 2 * 1024 * 1024 * 1024:
                 raise RaftStereoError(f"invalid checkpoint member size for {member!r}")
             return archive.read(info), member
@@ -577,8 +586,8 @@ def histogram_match_stereo_pair(
 def normalize_height_maps_for_displacement(
     height_maps: Mapping[str, np.ndarray],
     *,
-    lower_percentile: float = 1.0,
-    upper_percentile: float = 99.0,
+    lower_percentile: float = 0.0,
+    upper_percentile: float = 100.0,
 ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
     """Map one or more pixel-disparity fields to a shared display/displacement range."""
     if not height_maps:
@@ -624,18 +633,21 @@ def normalize_height_maps_for_displacement(
     lower = np.float32(bounds[0])
     upper = np.float32(bounds[1])
     del pooled
-    if not np.isfinite(lower) or not np.isfinite(upper) or upper <= lower:
+    if not np.isfinite(lower) or not np.isfinite(upper) or upper < lower:
         raise DisplacementMappingError(
-            "shared displacement percentile bounds are not distinct and finite"
+            "displacement bounds are not finite and ordered"
         )
-    scale = np.float32(upper - lower)
+    with np.errstate(over="ignore"):
+        scale = np.float32(upper - lower)
+    if not np.isfinite(scale):
+        raise DisplacementMappingError("displacement range exceeds finite float32")
 
     normalized: dict[str, np.ndarray] = {}
     for name, array in arrays.items():
         mapped = np.ascontiguousarray(
             np.divide(
                 np.subtract(array, lower, dtype=np.float32),
-                scale,
+                scale if scale > 0 else np.float32(1.0),
                 dtype=np.float32,
             ),
             dtype=np.float32,
@@ -644,7 +656,8 @@ def normalize_height_maps_for_displacement(
         normalized[name] = mapped
 
     details = {
-        "policy": "shared robust linear pixel-disparity mapping",
+        "policy": "explicit linear pixel-disparity mapping",
+        "constant_map": bool(upper == lower),
         "purpose": "display and normalized displacement input",
         "source_units": "pixels",
         "output_units": "normalized 0..1",
@@ -652,7 +665,10 @@ def normalize_height_maps_for_displacement(
         "upper_percentile": float(upper_percentile),
         "lower_bound_pixels_float32": float(lower),
         "upper_bound_pixels_float32": float(upper),
-        "formula": "clip((height_disparity_pixels - lower_bound) / (upper_bound - lower_bound), 0, 1)",
+        "formula": (
+            "finite samples map to zero; NaN remains NaN" if upper == lower else
+            "clip((height_disparity_pixels - lower_bound) / (upper_bound - lower_bound), 0, 1)"
+        ),
         "percentile_method": "NumPy linear",
         "shared_bounds_across_maps": list(arrays),
         "finite_input_counts": finite_counts,
@@ -750,9 +766,9 @@ def run_stereo_matching(
     if not np.isfinite(principal_point_delta):
         raise StereoMatchingError("spatial-photo principal-point calibration is nonfinite")
     height = np.ascontiguousarray(
-        np.abs(disparity + principal_point_delta), dtype=np.float32
+        disparity + principal_point_delta, dtype=np.float32
     )
-    height[~valid] = np.float32(np.nan)
+    height[~valid | (height < 0)] = np.float32(np.nan)
     finite = np.isfinite(height)
     valid_count = int(np.count_nonzero(finite))
     details = {
@@ -778,7 +794,7 @@ def run_stereo_matching(
         "valid_pixel_count": valid_count,
         "invalid_pixel_count": int(height.size - valid_count),
         "valid_pixel_fraction": valid_count / int(height.size),
-        "height_map_formula": "abs((stereo_sgbm_fixed_disparity / 16) + (cx_right - cx_left))",
+        "height_map_formula": "(stereo_sgbm_fixed_disparity / 16) + (cx_right - cx_left); negative/unmatched is NaN",
         "height_map_units": "pixels",
         "height_map_value_direction": "larger values generally indicate nearer geometry",
         "principal_point_delta_x_pixels": float(principal_point_delta),
@@ -817,8 +833,11 @@ def derive_raft_height_and_depth(
     ):
         raise RaftStereoError("spatial-photo metric calibration is not positive and finite")
     height_disparity = np.ascontiguousarray(
-        np.abs(flow + principal_point_delta), dtype=np.float32
+        principal_point_delta - flow, dtype=np.float32
     )
+    # RAFT predicts x_right - x_left; geometric disparity is the opposite sign.
+    # abs() would fold impossible negative disparities into plausible near geometry.
+    height_disparity[~np.isfinite(height_disparity) | (height_disparity < 0)] = np.float32(np.nan)
     numerator = np.float32(focal_length * baseline)
     with np.errstate(divide="ignore", invalid="ignore"):
         depth_meters = np.ascontiguousarray(
@@ -970,7 +989,7 @@ def run_raft_stereo(
         "full_decoded_resolution": True,
         "resized_or_tiled": False,
         "signed_flow_semantics": "horizontal x_right - x_left correspondence displacement in pixels",
-        "height_map_formula": "abs(signed_flow_pixels + (cx_right - cx_left))",
+        "height_map_formula": "(cx_right - cx_left) - signed_flow_pixels; negative/nonfinite is NaN",
         "height_map_units": "pixels",
         "height_map_value_direction": "larger values generally indicate nearer geometry",
         "metric_depth_formula": "float32(focal_length_pixels * baseline_meters) / height_disparity_pixels",

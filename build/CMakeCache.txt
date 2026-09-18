@@ -25,7 +25,7 @@ CMAKE_AR:FILEPATH=/usr/bin/ar
 CMAKE_BUILD_TYPE:STRING=
 
 //CXX compiler
-CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/c++
+CMAKE_CXX_COMPILER:STRING=/usr/bin/c++
 
 //Flags used by the CXX compiler during all build types.
 CMAKE_CXX_FLAGS:STRING=
@@ -173,7 +173,7 @@ CMAKE_OSX_SYSROOT:STRING=
 // find_package(), find_program(), find_library(), find_file(),
 // and find_path(). Empty by default; intended to be set by the
 // project or the user.
-CMAKE_PREFIX_PATH:UNINITIALIZED=/opt/Qt/6.11.1/macos/lib/cmake/Qt6
+CMAKE_PREFIX_PATH:UNINITIALIZED=/opt/Qt/6.11.2/macos/lib/cmake/Qt6
 
 //Value Computed by CMake
 CMAKE_PROJECT_COMPAT_VERSION:STATIC=
@@ -305,31 +305,31 @@ QT_ADDITIONAL_HOST_PACKAGES_PREFIX_PATH:STRING=
 QT_ADDITIONAL_PACKAGES_PREFIX_PATH:STRING=
 
 //The directory containing a CMake configuration file for Qt6CoreTools.
-Qt6CoreTools_DIR:PATH=/opt/Qt/6.11.1/macos/lib/cmake/Qt6CoreTools
+Qt6CoreTools_DIR:PATH=/opt/Qt/6.11.2/macos/lib/cmake/Qt6CoreTools
 
 //The directory containing a CMake configuration file for Qt6Core.
-Qt6Core_DIR:PATH=/opt/Qt/6.11.1/macos/lib/cmake/Qt6Core
+Qt6Core_DIR:PATH=/opt/Qt/6.11.2/macos/lib/cmake/Qt6Core
 
 //The directory containing a CMake configuration file for Qt6DBusTools.
-Qt6DBusTools_DIR:PATH=/opt/Qt/6.11.1/macos/lib/cmake/Qt6DBusTools
+Qt6DBusTools_DIR:PATH=/opt/Qt/6.11.2/macos/lib/cmake/Qt6DBusTools
 
 //The directory containing a CMake configuration file for Qt6DBus.
-Qt6DBus_DIR:PATH=/opt/Qt/6.11.1/macos/lib/cmake/Qt6DBus
+Qt6DBus_DIR:PATH=/opt/Qt/6.11.2/macos/lib/cmake/Qt6DBus
 
 //The directory containing a CMake configuration file for Qt6GuiTools.
-Qt6GuiTools_DIR:PATH=/opt/Qt/6.11.1/macos/lib/cmake/Qt6GuiTools
+Qt6GuiTools_DIR:PATH=/opt/Qt/6.11.2/macos/lib/cmake/Qt6GuiTools
 
 //The directory containing a CMake configuration file for Qt6Gui.
-Qt6Gui_DIR:PATH=/opt/Qt/6.11.1/macos/lib/cmake/Qt6Gui
+Qt6Gui_DIR:PATH=/opt/Qt/6.11.2/macos/lib/cmake/Qt6Gui
 
 //The directory containing a CMake configuration file for Qt6WidgetsTools.
-Qt6WidgetsTools_DIR:PATH=/opt/Qt/6.11.1/macos/lib/cmake/Qt6WidgetsTools
+Qt6WidgetsTools_DIR:PATH=/opt/Qt/6.11.2/macos/lib/cmake/Qt6WidgetsTools
 
 //The directory containing a CMake configuration file for Qt6Widgets.
-Qt6Widgets_DIR:PATH=/opt/Qt/6.11.1/macos/lib/cmake/Qt6Widgets
+Qt6Widgets_DIR:PATH=/opt/Qt/6.11.2/macos/lib/cmake/Qt6Widgets
 
 //The directory containing a CMake configuration file for Qt6.
-Qt6_DIR:PATH=/opt/Qt/6.11.1/macos/lib/cmake/Qt6
+Qt6_DIR:PATH=/opt/Qt/6.11.2/macos/lib/cmake/Qt6
 
 
 ########################
@@ -347,7 +347,7 @@ CMAKE_CACHE_MAJOR_VERSION:INTERNAL=4
 //Minor version of cmake used to create the current loaded cache
 CMAKE_CACHE_MINOR_VERSION:INTERNAL=4
 //Patch version of cmake used to create the current loaded cache
-CMAKE_CACHE_PATCH_VERSION:INTERNAL=2
+CMAKE_CACHE_PATCH_VERSION:INTERNAL=3
 //Path to CMake executable.
 CMAKE_COMMAND:INTERNAL=/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/site-packages/cmake/data/bin/cmake
 //Path to cpack program executable.

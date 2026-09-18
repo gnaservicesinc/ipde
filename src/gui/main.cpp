@@ -21,6 +21,8 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSet>
+#include <QSettings>
+#include <QMap>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTextEdit>
@@ -77,7 +79,7 @@ class MainWindow final : public QMainWindow {
 public:
     MainWindow() {
         setWindowTitle(QStringLiteral("IPDE — Precision HEIF Auxiliary Extractor"));
-        resize(1040, 720);
+        resize(1100, 780);
         setAcceptDrops(true);
 
         auto *central = new QWidget(this);
@@ -100,7 +102,7 @@ public:
 
         files_ = new QTreeWidget(central);
         files_->setColumnCount(3);
-        files_->setHeaderLabels({QStringLiteral("Source / auxiliary plane"), QStringLiteral("Status / dimensions"), QStringLiteral("Precision")});
+        files_->setHeaderLabels({QStringLiteral("Source / output — check only what you want"), QStringLiteral("Status / dimensions"), QStringLiteral("Precision")});
         files_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
         files_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
         files_->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
@@ -131,24 +133,9 @@ public:
 
         auto *options = new QHBoxLayout;
         exactNpy_ = new QCheckBox(QStringLiteral("Write exact .npy companions"), central);
-        exactNpy_->setChecked(true);
-        physicalDisparity_ = new QCheckBox(QStringLiteral("Calibrated disparity (.exr, near = high)"), central);
-        physicalDisparity_->setChecked(true);
-        physicalDisparity_->setToolTip(QStringLiteral(
-            "Write float32 physical disparity in inverse meters. This remains linear with the source codes."));
-        metricDepth_ = new QCheckBox(QStringLiteral("Metric distance (.exr, near = low)"), central);
-        metricDepth_->setChecked(true);
-        metricDepth_->setToolTip(QStringLiteral(
-            "Write reciprocal float32 distance in meters. It retains the source's 8-bit quantization."));
-        stereoComparison_ = new QCheckBox(
-            QStringLiteral("Compare Stereo Matching + RAFT-Stereo height maps"), central);
-        stereoComparison_->setChecked(false);
-        stereoComparison_->setToolTip(QStringLiteral(
-            "Write two directly comparable full-resolution near-is-high float32 EXRs: one classical "
-            "StereoSGBM height map and one RAFT-Stereo height map. Diagnostic flow and metric-distance "
-            "maps are omitted."));
+        exactNpy_->setChecked(false);
         colorMatching_ = new QCheckBox(QStringLiteral("Color Matching"), central);
-        colorMatching_->setChecked(true);
+        colorMatching_->setChecked(false);
         colorMatching_->setToolTip(QStringLiteral(
             "Before inference only, histogram-match each RGB channel of the non-Hero stereo view to "
             "the Hero view. Raw extracted views remain untouched. This matches marginal code-value "
@@ -156,47 +143,80 @@ public:
         colorHero_ = new QComboBox(central);
         colorHero_->addItem(QStringLiteral("Hero: Left view"), QStringLiteral("left"));
         colorHero_->addItem(QStringLiteral("Hero: Right view"), QStringLiteral("right"));
-        colorMatching_->setEnabled(false);
         colorHero_->setEnabled(false);
         colorHero_->setToolTip(QStringLiteral(
             "The Hero view is preserved unchanged; the other view receives the recorded histogram LUTs."));
-        displacementMaps_ = new QCheckBox(QStringLiteral("0–1 displacement maps"), central);
-        displacementMaps_->setChecked(true);
-        displacementMaps_->setEnabled(false);
-        displacementMaps_->setToolTip(QStringLiteral(
-            "Also write explicitly normalized float32 displacement derivatives. StereoSGBM and "
-            "RAFT use the same recorded 1st–99th percentile pixel-disparity range, while the "
-            "scientific pixel-disparity EXRs remain unchanged."));
         raftDevice_ = new QComboBox(central);
         raftDevice_->addItem(QStringLiteral("RAFT device: Automatic"), QStringLiteral("auto"));
         raftDevice_->addItem(QStringLiteral("RAFT device: Apple Metal"), QStringLiteral("mps"));
         raftDevice_->addItem(QStringLiteral("RAFT device: CPU"), QStringLiteral("cpu"));
-        raftDevice_->setEnabled(false);
+        raftDevice_->addItem(QStringLiteral("RAFT device: CUDA"), QStringLiteral("cuda"));
         raftDevice_->setToolTip(QStringLiteral(
             "Automatic prefers Apple Metal on this Mac and falls back to CPU only when Metal is unavailable."));
         overwrite_ = new QCheckBox(QStringLiteral("Replace existing outputs"), central);
         options->addWidget(exactNpy_);
-        options->addWidget(physicalDisparity_);
-        options->addWidget(metricDepth_);
+
         options->addWidget(overwrite_);
         options->addStretch();
         root->addLayout(options);
 
         auto *spatialOptions = new QHBoxLayout;
         spatialOptions->addWidget(new QLabel(QStringLiteral("Spatial Photo:"), central));
-        spatialOptions->addWidget(stereoComparison_);
         spatialOptions->addWidget(colorMatching_);
         spatialOptions->addWidget(colorHero_);
-        spatialOptions->addWidget(displacementMaps_);
         spatialOptions->addWidget(raftDevice_);
         spatialOptions->addStretch();
         root->addLayout(spatialOptions);
+
+        auto addPathRow = [this, root, central](const QString &label, const QString &key,
+                                                bool directory) {
+            auto *row = new QHBoxLayout;
+            row->addWidget(new QLabel(label, central));
+            auto *edit = new QLineEdit(QSettings().value(key).toString(), central);
+            edit->setPlaceholderText(QStringLiteral("Automatic lookup (or choose a path)"));
+            auto *choose = new QPushButton(QStringLiteral("Choose…"), central);
+            row->addWidget(edit, 1);
+            row->addWidget(choose);
+            root->addLayout(row);
+            connect(edit, &QLineEdit::textChanged, this, [key](const QString &text) {
+                QSettings().setValue(key, text);
+            });
+            connect(choose, &QPushButton::clicked, this, [this, edit, directory] {
+                if (running_) return;
+                const QString chosen = directory
+                    ? QFileDialog::getExistingDirectory(this, QStringLiteral("Choose RAFT-Stereo source folder"), edit->text())
+                    : QFileDialog::getOpenFileName(this, QStringLiteral("Choose RAFT-Stereo model"), edit->text(),
+                          QStringLiteral("Model checkpoints (*.pth *.pt *.zip);;All files (*)"));
+                if (!chosen.isEmpty()) edit->setText(chosen);
+            });
+            return edit;
+        };
+        raftModel_ = addPathRow(QStringLiteral("RAFT model:"), QStringLiteral("raft/model"), false);
+        raftRoot_ = addPathRow(QStringLiteral("RAFT source folder:"), QStringLiteral("raft/root"), true);
+        auto *memberRow = new QHBoxLayout;
+        memberRow->addWidget(new QLabel(QStringLiteral("Model inside ZIP:"), central));
+        raftMember_ = new QLineEdit(QSettings().value(QStringLiteral("raft/member")).toString(), central);
+        raftMember_->setPlaceholderText(QStringLiteral("raftstereo-middlebury.pth (only for ZIP models)"));
+        memberRow->addWidget(raftMember_);
+        root->addLayout(memberRow);
+        connect(raftMember_, &QLineEdit::textChanged, this, [](const QString &text) {
+            QSettings().setValue(QStringLiteral("raft/member"), text);
+        });
+        auto *help = new QLabel(QStringLiteral(
+            "Check individual outputs, then Export checked. Or select one row and click Export this map. "
+            "For a 0–1 height input choose RAFT height — 0–1 displacement. Raw pixel disparity can look white "
+            "in a 0–1 viewer; unmatched classical pixels remain NaN."), central);
+        help->setWordWrap(true);
+        root->addWidget(help);
+
 
         auto *runRow = new QHBoxLayout;
         progress_ = new QProgressBar(central);
         progress_->setRange(0, 1);
         progress_->setValue(0);
-        extract_ = new QPushButton(QStringLiteral("Extract verified outputs"), central);
+        extract_ = new QPushButton(QStringLiteral("Export checked"), central);
+        exportOne_ = new QPushButton(QStringLiteral("Export this map"), central);
+        runRow->addWidget(exportOne_);
         cancel_ = new QPushButton(QStringLiteral("Cancel"), central);
         cancel_->setEnabled(false);
         runRow->addWidget(progress_, 1);
@@ -228,7 +248,8 @@ public:
             const auto selected = files_->selectedItems();
             QSet<QTreeWidgetItem *> roots;
             for (auto *item : selected) {
-                roots.insert(item->parent() ? item->parent() : item);
+                while (item->parent()) item = item->parent();
+                roots.insert(item);
             }
             for (auto *item : roots) {
                 sources_.removeAll(item->data(0, Qt::UserRole).toString());
@@ -244,6 +265,7 @@ public:
             }
         });
         connect(browse, &QPushButton::clicked, this, [this] {
+            if (running_) return;
             const QString chosen = QFileDialog::getExistingDirectory(this, QStringLiteral("Choose output folder"), output_->text());
             if (!chosen.isEmpty()) {
                 output_->setText(chosen);
@@ -251,15 +273,19 @@ public:
         });
         connect(inspect_, &QPushButton::clicked, this, [this] { beginQueue(true); });
         connect(extract_, &QPushButton::clicked, this, [this] { beginQueue(false); });
-        connect(stereoComparison_, &QCheckBox::toggled, this, [this](bool checked) {
-            raftDevice_->setEnabled(checked && !running_);
-            colorMatching_->setEnabled(checked && !running_);
-            colorHero_->setEnabled(checked && colorMatching_->isChecked() && !running_);
-            displacementMaps_->setEnabled(checked && !running_);
+        connect(exportOne_, &QPushButton::clicked, this, [this] {
+            auto *item = files_->currentItem();
+            if (!item || item->data(0, Qt::UserRole + 1).toString().isEmpty()) return;
+            singleSource_ = item->parent()->data(0, Qt::UserRole).toString();
+            singleProduct_ = item->data(0, Qt::UserRole + 1).toString();
+            beginQueue(false);
+            singleSource_.clear();
+            singleProduct_.clear();
         });
+        connect(files_, &QTreeWidget::itemSelectionChanged, this, [this] { updateButtons(); });
+        connect(files_, &QTreeWidget::itemChanged, this, [this] { updateButtons(); });
         connect(colorMatching_, &QCheckBox::toggled, this, [this](bool checked) {
-            colorHero_->setEnabled(
-                checked && stereoComparison_->isChecked() && !running_);
+            colorHero_->setEnabled(checked && !running_);
         });
         connect(cancel_, &QPushButton::clicked, this, [this] {
             cancelled_ = true;
@@ -309,6 +335,7 @@ protected:
 
 private:
     void addFiles(const QStringList &paths) {
+        if (running_) return;
         bool added = false;
         for (const QString &raw : paths) {
             const QString path = QFileInfo(raw).absoluteFilePath();
@@ -353,10 +380,31 @@ private:
             log_->append(QStringLiteral("Bundled extractor does not exist: %1").arg(script));
             return;
         }
+        selectedProducts_.clear();
+        if (!inspectOnly) {
+            if (!singleProduct_.isEmpty()) {
+                selectedProducts_[singleSource_] = {singleProduct_};
+            } else {
+                for (int i = 0; i < files_->topLevelItemCount(); ++i) {
+                    auto *source = files_->topLevelItem(i);
+                    QStringList products;
+                    for (int j = 0; j < source->childCount(); ++j) {
+                        auto *child = source->child(j);
+                        if (child->checkState(0) == Qt::Checked)
+                            products << child->data(0, Qt::UserRole + 1).toString();
+                    }
+                    if (!products.isEmpty()) selectedProducts_[source->data(0, Qt::UserRole).toString()] = products;
+                }
+            }
+            if (selectedProducts_.isEmpty()) {
+                log_->append(QStringLiteral("Check an output or select a row and use Export this map."));
+                return;
+            }
+        }
         inspectOnly_ = inspectOnly;
         cancelled_ = false;
         running_ = true;
-        queue_ = sources_;
+        queue_ = inspectOnly ? sources_ : selectedProducts_.keys();
         total_ = queue_.size();
         completed_ = 0;
         progress_->setRange(0, total_);
@@ -388,23 +436,20 @@ private:
             if (!exactNpy_->isChecked()) {
                 arguments << QStringLiteral("--no-npy");
             }
-            if (!metricDepth_->isChecked()) {
-                arguments << QStringLiteral("--no-metric-depth");
+            for (const auto &id : selectedProducts_.value(current_))
+                arguments << QStringLiteral("--select") << id;
+            arguments << QStringLiteral("--raft-device") << raftDevice_->currentData().toString();
+            if (colorMatching_->isChecked()) {
+                arguments << QStringLiteral("--color-matching") << QStringLiteral("--color-hero")
+                          << colorHero_->currentData().toString();
             }
-            if (!physicalDisparity_->isChecked()) {
-                arguments << QStringLiteral("--no-physical-disparity");
-            }
-            if (stereoComparison_->isChecked()) {
-                arguments << QStringLiteral("--stereo-comparison") << QStringLiteral("--raft-device")
-                          << raftDevice_->currentData().toString();
-                if (displacementMaps_->isChecked()) {
-                    arguments << QStringLiteral("--displacement-maps");
-                }
-                if (colorMatching_->isChecked()) {
-                    arguments << QStringLiteral("--color-matching") << QStringLiteral("--color-hero")
-                              << colorHero_->currentData().toString();
-                }
-            }
+            if (!raftModel_->text().trimmed().isEmpty())
+                arguments << QStringLiteral("--raft-model") << raftModel_->text().trimmed();
+            if (!raftRoot_->text().trimmed().isEmpty())
+                arguments << QStringLiteral("--raft-root") << raftRoot_->text().trimmed();
+            if (!raftMember_->text().trimmed().isEmpty())
+                arguments << QStringLiteral("--raft-model-member") << raftMember_->text().trimmed();
+
         }
         arguments << current_;
         if (auto *item = rootForPath(current_)) {
@@ -432,6 +477,13 @@ private:
                     root->setToolTip(1, message);
                 }
             } else if (root) {
+                QSet<QString> checked;
+                const QString currentProduct = files_->currentItem()
+                    ? files_->currentItem()->data(0, Qt::UserRole + 1).toString() : QString();
+                for (int j = 0; j < root->childCount(); ++j) {
+                    if (root->child(j)->checkState(0) == Qt::Checked)
+                        checked.insert(root->child(j)->data(0, Qt::UserRole + 1).toString());
+                }
                 while (root->childCount() > 0) {
                     delete root->takeChild(0);
                 }
@@ -445,31 +497,26 @@ private:
                                       : QStringLiteral("Spatial Photo · %1 plane(s)").arg(assets.size()));
                 root->setText(2, inspectOnly_ ? QStringLiteral("Decoded inventory") : QStringLiteral("Verified outputs"));
                 for (const QJsonValue &value : assets) {
-                    const QJsonObject asset = value.toObject();
-                    auto *child = new QTreeWidgetItem(root);
-                    child->setText(0, asset.value(QStringLiteral("semantic_name")).toString());
-                    child->setText(1, dimensionText(asset));
-                    child->setText(
-                        2,
-                        QStringLiteral("%1 · source %2-bit")
-                            .arg(asset.value(QStringLiteral("dtype_name")).toString())
-                            .arg(asset.value(QStringLiteral("source_bit_depth")).toInt()));
-                    const QString auxType = asset.value(QStringLiteral("aux_type")).toString();
-                    if (!auxType.isEmpty()) {
-                        child->setToolTip(0, auxType);
-                    }
-                    const QJsonArray outputs = asset.value(QStringLiteral("outputs")).toArray();
+                    const auto outputs = value.toObject().value(QStringLiteral("outputs")).toArray();
                     outputCount += outputs.size();
-                    for (const QJsonValue &outputValue : outputs) {
-                        const QJsonObject output = outputValue.toObject();
-                        auto *outputItem = new QTreeWidgetItem(child);
-                        outputItem->setText(0, output.value(QStringLiteral("filename")).toString());
-                        outputItem->setText(1, QStringLiteral("Verified"));
-                        outputItem->setText(2, output.value(QStringLiteral("role")).toString());
-                        outputItem->setToolTip(0, output.value(QStringLiteral("path")).toString());
-                    }
-                    child->setExpanded(!outputs.isEmpty());
+                    for (const auto &entry : outputs)
+                        log_->append(entry.toObject().value(QStringLiteral("path")).toString().toHtmlEscaped());
                 }
+                const auto products = object.value(QStringLiteral("available_products")).toArray();
+                for (const auto &entry : products) {
+                    const auto product = entry.toObject();
+                    const auto id = product.value(QStringLiteral("id")).toString();
+                    auto *child = new QTreeWidgetItem(root);
+                    child->setText(0, product.value(QStringLiteral("name")).toString());
+                    child->setText(1, dimensionText(product));
+                    child->setText(2, product.value(QStringLiteral("precision")).toString());
+                    child->setData(0, Qt::UserRole + 1, id);
+                    child->setFlags(child->flags() | Qt::ItemIsUserCheckable);
+                    child->setCheckState(0, checked.contains(id) ? Qt::Checked : Qt::Unchecked);
+                    if (id == currentProduct) files_->setCurrentItem(child);
+                }
+                for (const auto &warning : object.value(QStringLiteral("warnings")).toArray())
+                    log_->append(warning.toString().toHtmlEscaped());
                 root->setExpanded(true);
                 if (!spatial.isEmpty()) {
                     log_->append(
@@ -515,26 +562,30 @@ private:
         cancel_->setEnabled(running_);
         output_->setEnabled(!running_);
         exactNpy_->setEnabled(!running_);
-        physicalDisparity_->setEnabled(!running_);
-        metricDepth_->setEnabled(!running_);
-        stereoComparison_->setEnabled(!running_);
-        colorMatching_->setEnabled(!running_ && stereoComparison_->isChecked());
-        colorHero_->setEnabled(
-            !running_ && stereoComparison_->isChecked() && colorMatching_->isChecked());
-        displacementMaps_->setEnabled(!running_ && stereoComparison_->isChecked());
-        raftDevice_->setEnabled(!running_ && stereoComparison_->isChecked());
+        colorMatching_->setEnabled(!running_);
+        colorHero_->setEnabled(!running_ && colorMatching_->isChecked());
+        raftDevice_->setEnabled(!running_);
+        raftModel_->setEnabled(!running_);
+        raftRoot_->setEnabled(!running_);
+        raftMember_->setEnabled(!running_);
+        files_->setEnabled(!running_);
+        const auto *item = files_->currentItem();
+        exportOne_->setEnabled(!running_ && item && !item->data(0, Qt::UserRole + 1).toString().isEmpty());
         overwrite_->setEnabled(!running_);
     }
 
     QTreeWidget *files_ = nullptr;
     QLineEdit *output_ = nullptr;
+    QLineEdit *raftModel_ = nullptr;
+    QLineEdit *raftRoot_ = nullptr;
+    QLineEdit *raftMember_ = nullptr;
+    QPushButton *exportOne_ = nullptr;
+    QMap<QString, QStringList> selectedProducts_;
+    QString singleSource_;
+    QString singleProduct_;
     QCheckBox *exactNpy_ = nullptr;
-    QCheckBox *physicalDisparity_ = nullptr;
-    QCheckBox *metricDepth_ = nullptr;
-    QCheckBox *stereoComparison_ = nullptr;
     QCheckBox *colorMatching_ = nullptr;
     QComboBox *colorHero_ = nullptr;
-    QCheckBox *displacementMaps_ = nullptr;
     QComboBox *raftDevice_ = nullptr;
     QCheckBox *overwrite_ = nullptr;
     QPushButton *inspect_ = nullptr;

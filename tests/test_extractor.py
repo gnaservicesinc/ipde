@@ -17,10 +17,16 @@ from ipde.extractor import (
     extract_file,
     inspect_file,
     reconstruct_metric_depth,
+    reconstruct_physical_disparity,
     semantic_name,
 )
 from ipde.formats import arrays_bit_equal, read_exr_exact, read_npy_exact, read_png_exact
 from ipde.libheif_aux import DecodedAuxiliary
+from ipde.spatial import (
+    HistogramMatchedStereoPair,
+    RaftStereoResult,
+    StereoMatchingResult,
+)
 
 
 class FakeImage:
@@ -77,6 +83,12 @@ class FakeFile:
     def __iter__(self):
         return iter(self.images)
 
+    def __len__(self) -> int:
+        return len(self.images)
+
+    def __getitem__(self, index: int) -> FakeParent:
+        return self.images[index]
+
 
 def fixture_file() -> FakeFile:
     depth = FakeImage(
@@ -116,18 +128,286 @@ def fixture_file() -> FakeFile:
 
 
 class ExtractorTests(unittest.TestCase):
+    def test_spatial_photo_extracts_comparable_height_maps_and_optional_diagnostics(self) -> None:
+        primary = FakeParent(
+            np.zeros((2, 3, 3), dtype=np.uint8),
+            "RGB",
+            8,
+            info={"primary": True, "bit_depth": 8, "depth_images": [], "aux": {}, "thumbnails": []},
+        )
+        left_array = np.arange(18, dtype=np.uint8).reshape(2, 3, 3)
+        right_array = np.flip(left_array, axis=1).copy()
+        left = FakeParent(
+            left_array,
+            "RGB",
+            8,
+            info={"primary": False, "bit_depth": 8, "depth_images": [], "aux": {}, "thumbnails": []},
+        )
+        right = FakeParent(
+            right_array,
+            "RGB",
+            8,
+            info={"primary": False, "bit_depth": 8, "depth_images": [], "aux": {}, "thumbnails": []},
+        )
+        camera_model = {
+            "ModelType": "SimplifiedPinhole",
+            "Intrinsics": [100.0, 0.0, 1.5, 0.0, 100.0, 1.0, 0.0, 0.0, 1.0],
+        }
+        imageio_metadata = {
+            "groups": [
+                {
+                    "GroupType": "StereoPair",
+                    "GroupIndex": 0,
+                    "GroupImageIndexLeft": 1,
+                    "GroupImageIndexRight": 2,
+                    "GroupImageIndexMonoscopic": 0,
+                    "GroupImageDisparityAdjustment": 100,
+                }
+            ],
+            "images": [
+                {},
+                {
+                    "PixelWidth": 3,
+                    "PixelHeight": 2,
+                    "Orientation": 1,
+                    "{HEIF}": {
+                        "CameraExtrinsics": {
+                            "CoordinateSystemID": 0,
+                            "Position": [0.0, 0.0, 0.0],
+                            "Rotation": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+                        },
+                        "CameraModel": camera_model,
+                    },
+                },
+                {
+                    "PixelWidth": 3,
+                    "PixelHeight": 2,
+                    "Orientation": 1,
+                    "{HEIF}": {
+                        "CameraExtrinsics": {
+                            "CoordinateSystemID": 0,
+                            "Position": [0.05, 0.0, 0.0],
+                            "Rotation": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+                        },
+                        "CameraModel": camera_model,
+                    },
+                },
+            ],
+        }
+        signed_flow = np.array([[-1.0, -2.0, -3.0], [-4.0, -5.0, -6.0]], dtype=np.float32)
+        height = np.abs(signed_flow)
+        depth = np.float32(5.0) / height
+        raft_result = RaftStereoResult(
+            signed_flow,
+            height,
+            depth,
+            {"engine": "RAFT-Stereo fixture", "precision_scope": "test"},
+        )
+        stereo_height = np.array([[1.0, 2.0, np.nan], [4.0, 5.0, 6.0]], dtype=np.float32)
+        stereo_result = StereoMatchingResult(
+            stereo_height,
+            {"engine": "StereoSGBM fixture", "precision_scope": "test"},
+        )
+        matched_right = np.bitwise_xor(right_array, np.uint8(1))
+        matched_pair = HistogramMatchedStereoPair(
+            left_array.copy(),
+            matched_right,
+            {
+                "applied": True,
+                "hero_side": "left",
+                "transformed_side": "right",
+                "raw_assets_modified": False,
+            },
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "spatial.heic"
+            source.write_bytes(b"fake-spatial-heif")
+            comparison_dir = Path(directory) / "comparison"
+            diagnostics_dir = Path(directory) / "diagnostics"
+            with (
+                patch(
+                    "ipde.extractor.pillow_heif.open_heif",
+                    return_value=FakeFile([primary, left, right]),
+                ),
+                patch(
+                    "ipde.extractor.read_apple_imageio_metadata",
+                    return_value=imageio_metadata,
+                ),
+                patch(
+                    "ipde.extractor.run_stereo_matching",
+                    return_value=stereo_result,
+                ) as stereo_runner,
+                patch(
+                    "ipde.extractor.histogram_match_stereo_pair",
+                    return_value=matched_pair,
+                ) as color_runner,
+                patch("ipde.extractor.run_raft_stereo", return_value=raft_result) as runner,
+            ):
+                report = extract_file(
+                    source,
+                    ExtractOptions(
+                        output_dir=comparison_dir,
+                        write_npy=False,
+                        write_metric_depth=False,
+                        write_physical_disparity=False,
+                        write_stereo_matching=True,
+                        write_raft_stereo=True,
+                        histogram_color_matching=True,
+                        color_matching_hero="left",
+                        write_displacement_maps=True,
+                    ),
+                )
+                diagnostic_report = extract_file(
+                    source,
+                    ExtractOptions(
+                        output_dir=diagnostics_dir,
+                        write_npy=False,
+                        write_metric_depth=False,
+                        write_physical_disparity=False,
+                        write_raft_stereo=True,
+                        write_raft_diagnostics=True,
+                    ),
+                )
+
+            self.assertEqual(runner.call_count, 2)
+            stereo_runner.assert_called_once()
+            color_runner.assert_called_once()
+            self.assertTrue(arrays_bit_equal(stereo_runner.call_args.args[0], left_array))
+            self.assertTrue(arrays_bit_equal(stereo_runner.call_args.args[1], matched_right))
+            self.assertTrue(
+                arrays_bit_equal(read_png_exact(comparison_dir / "spatial_spatial_left.png"), left_array)
+            )
+            self.assertTrue(
+                arrays_bit_equal(read_png_exact(comparison_dir / "spatial_spatial_right.png"), right_array)
+            )
+            self.assertTrue(
+                arrays_bit_equal(
+                    read_exr_exact(
+                        comparison_dir
+                        / "spatial_spatial_stereo_matching_color_matched_height.exr",
+                        stereo_height.shape,
+                    ),
+                    stereo_height,
+                )
+            )
+            self.assertTrue(
+                arrays_bit_equal(
+                    read_exr_exact(
+                        comparison_dir
+                        / "spatial_spatial_raft_stereo_color_matched_height.exr",
+                        height.shape,
+                    ),
+                    height,
+                )
+            )
+            expected_stereo_displacement = np.clip(
+                (stereo_height - np.float32(1.0)) / np.float32(5.0),
+                np.float32(0.0),
+                np.float32(1.0),
+            ).astype(np.float32)
+            expected_raft_displacement = np.clip(
+                (height - np.float32(1.0)) / np.float32(5.0),
+                np.float32(0.0),
+                np.float32(1.0),
+            ).astype(np.float32)
+            self.assertTrue(
+                arrays_bit_equal(
+                    read_exr_exact(
+                        comparison_dir
+                        / "spatial_spatial_stereo_matching_color_matched_displacement_0_to_1.exr",
+                        stereo_height.shape,
+                    ),
+                    expected_stereo_displacement,
+                )
+            )
+            self.assertTrue(
+                arrays_bit_equal(
+                    read_exr_exact(
+                        comparison_dir
+                        / "spatial_spatial_raft_stereo_color_matched_displacement_0_to_1.exr",
+                        height.shape,
+                    ),
+                    expected_raft_displacement,
+                )
+            )
+            self.assertFalse(
+                (
+                    comparison_dir
+                    / "spatial_spatial_raft_stereo_color_matched_signed_flow.exr"
+                ).exists()
+            )
+            self.assertFalse(
+                (
+                    comparison_dir
+                    / "spatial_spatial_raft_stereo_color_matched_depth_meters.exr"
+                ).exists()
+            )
+            self.assertTrue(
+                arrays_bit_equal(
+                    read_exr_exact(
+                        diagnostics_dir / "spatial_spatial_raft_stereo_signed_flow.exr",
+                        signed_flow.shape,
+                    ),
+                    signed_flow,
+                )
+            )
+            self.assertTrue(
+                arrays_bit_equal(
+                    read_exr_exact(
+                        diagnostics_dir / "spatial_spatial_raft_stereo_depth_meters.exr",
+                        depth.shape,
+                    ),
+                    depth,
+                )
+            )
+            self.assertTrue(report["source"]["spatial_photo"]["is_spatial_photo"])
+            roles = [output["role"] for output in report["assets"][0]["outputs"]]
+            self.assertIn("derived_stereo_matching_height_map", roles)
+            self.assertIn("derived_raft_stereo_height_map", roles)
+            self.assertIn("derived_stereo_matching_displacement_0_to_1", roles)
+            self.assertIn("derived_raft_stereo_displacement_0_to_1", roles)
+            matching_output = next(
+                output
+                for output in report["assets"][0]["outputs"]
+                if output["role"] == "derived_stereo_matching_height_map"
+            )
+            self.assertTrue(matching_output["derivation"]["input_color_matching"]["applied"])
+            self.assertEqual(
+                matching_output["derivation"]["input_color_matching"]["hero_side"],
+                "left",
+            )
+            displacement_output = next(
+                output
+                for output in report["assets"][0]["outputs"]
+                if output["role"] == "derived_raft_stereo_displacement_0_to_1"
+            )
+            mapping = displacement_output["derivation"]["displacement_mapping"]
+            self.assertEqual(
+                mapping["shared_bounds_across_maps"],
+                ["raft_stereo"],
+            )
+            self.assertFalse(mapping["scientific_pixel_disparity_replaced"])
+            diagnostic_roles = [
+                output["role"] for output in diagnostic_report["assets"][0]["outputs"]
+            ]
+            self.assertIn("derived_raft_stereo_signed_flow", diagnostic_roles)
+            self.assertIn("derived_raft_stereo_metric_depth", diagnostic_roles)
+
     def test_metric_depth_reconstruction_uses_exact_float32_operation_order(self) -> None:
         raw = np.array([[0, 1, 127, 255], [254, 128, 64, 32]], dtype=np.uint8)
         metadata = {"d_min": 1.5, "d_max": 4.5, "representation_type": 1}
 
-        actual = reconstruct_metric_depth(raw, metadata)
         normalized = raw.astype(np.float32) / np.float32(255.0)
-        disparity = normalized * (np.float32(4.5) - np.float32(1.5)) + np.float32(1.5)
+        disparity = reconstruct_physical_disparity(raw, metadata)
+        expected_disparity = normalized * (np.float32(4.5) - np.float32(1.5)) + np.float32(1.5)
+        actual = reconstruct_metric_depth(raw, metadata)
         expected = np.float32(1.0) / disparity
 
+        self.assertTrue(arrays_bit_equal(disparity, expected_disparity))
         self.assertEqual(actual.dtype, np.dtype("float32"))
         self.assertTrue(actual.flags.c_contiguous)
         self.assertTrue(arrays_bit_equal(actual, expected))
+        self.assertEqual(np.unique(actual).size, np.unique(raw).size)
         self.assertEqual(actual[0, 0], np.float32(1.0) / np.float32(1.5))
         self.assertEqual(actual[0, 3], np.float32(1.0) / np.float32(4.5))
 
@@ -170,20 +450,49 @@ class ExtractorTests(unittest.TestCase):
                 report = extract_file(source, ExtractOptions(write_npy=False))
 
             exr_path = Path(directory) / "metric_depth_meters.exr"
+            disparity_path = Path(directory) / "metric_depth_disparity.exr"
             self.assertTrue(exr_path.is_file())
+            self.assertTrue(disparity_path.is_file())
             expected = reconstruct_metric_depth(raw, metadata)
+            expected_disparity = reconstruct_physical_disparity(raw, metadata)
             self.assertTrue(arrays_bit_equal(read_exr_exact(exr_path, raw.shape), expected))
+            self.assertTrue(
+                arrays_bit_equal(read_exr_exact(disparity_path, raw.shape), expected_disparity)
+            )
 
-            output = next(
+            metric_output = next(
                 item
                 for item in report["assets"][0]["outputs"]
                 if item["role"] == "derived_metric_depth"
             )
-            self.assertTrue(output["verified"])
-            self.assertEqual(output["derivation"]["output_dtype"], "float32")
-            self.assertEqual(output["derivation"]["depth_units"], "m")
-            self.assertEqual(output["derivation"]["d_min"], 1.5)
-            self.assertEqual(output["derivation"]["d_max"], 4.5)
+            disparity_output = next(
+                item
+                for item in report["assets"][0]["outputs"]
+                if item["role"] == "derived_physical_disparity"
+            )
+            self.assertTrue(metric_output["verified"])
+            self.assertEqual(metric_output["derivation"]["output_dtype"], "float32")
+            self.assertEqual(metric_output["derivation"]["depth_units"], "m")
+            self.assertIn("nearer geometry is numerically smaller", metric_output["derivation"]["value_direction"])
+            self.assertFalse(
+                metric_output["derivation"]["source_quantization"]["restores_additional_precision"]
+            )
+            self.assertEqual(
+                metric_output["derivation"]["source_quantization"]["source_codes_present"],
+                np.unique(raw).size,
+            )
+            self.assertEqual(
+                metric_output["derivation"]["distinct_values_present"],
+                np.unique(raw).size,
+            )
+            self.assertEqual(metric_output["derivation"]["d_min"], 1.5)
+            self.assertEqual(metric_output["derivation"]["d_max"], 4.5)
+            self.assertTrue(disparity_output["verified"])
+            self.assertEqual(disparity_output["derivation"]["units"], "1/m")
+            self.assertEqual(
+                disparity_output["derivation"]["value_direction"],
+                "larger values indicate nearer geometry",
+            )
 
     def test_semantic_urn_names(self) -> None:
         self.assertEqual(semantic_name("urn:com:apple:photo:2020:aux:hdrgainmap"), "hdr_gain_map")

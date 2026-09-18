@@ -1,6 +1,6 @@
 PYTHON_BASE := /Library/Frameworks/Python.framework/Versions/3.14/bin/python3.14
 PYTHON := $(if $(wildcard .venv/bin/python),$(CURDIR)/.venv/bin/python,$(PYTHON_BASE))
-QT_CMAKE := /opt/Qt/6.11.1/macos/lib/cmake/Qt6
+QT_CMAKE := /opt/Qt/6.11.2/macos/lib/cmake/Qt6
 BUILD_DIR := build
 
 .PHONY: setup configure build gui test smoke clean

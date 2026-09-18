@@ -10,7 +10,7 @@ import os
 import re
 import tempfile
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -63,6 +63,7 @@ class ExtractionError(RuntimeError):
 
 @dataclass(frozen=True)
 class ExtractOptions:
+    selected_products: tuple[str, ...] | None = None
     output_dir: Path | None = None
     write_npy: bool = True
     write_metric_depth: bool = True
@@ -823,7 +824,7 @@ def _raft_pending_outputs(
             "derived_raft_stereo_height_map",
             "pixels",
             "nonnegative stereo disparity height map; near values are generally larger",
-            "abs(signed_flow + (cx_right-cx_left))",
+            "(cx_right-cx_left)-signed_flow; negative/nonfinite is NaN",
             "larger values generally indicate nearer geometry",
         ),
     ]
@@ -934,7 +935,7 @@ def _stereo_matching_pending_outputs(
                         "NaN is unmatched"
                     ),
                     "ipdeTransform": (
-                        "abs((StereoSGBM fixed disparity / 16) + (cx_right-cx_left))"
+                        "(StereoSGBM fixed disparity / 16) + (cx_right-cx_left); negative/unmatched is NaN"
                     ),
                     "ipdePrecision": (
                         "classical 1/16-pixel inferred estimate; not measured source depth"
@@ -1014,8 +1015,8 @@ def _displacement_pending_outputs(
                 temp,
                 a,
                 storage_description=(
-                    "Explicit full-resolution 0..1 displacement derivative; shared robust linear "
-                    "mapping from the separately preserved pixel-disparity height map"
+                    "Explicit full-resolution 0..1 displacement derivative; per-map full-range linear "
+                    "mapping from pixel-disparity height; raw output available separately"
                 ),
                 attributes={
                     "ipdeUnits": "normalized 0..1",
@@ -1028,7 +1029,7 @@ def _displacement_pending_outputs(
                         f"{bounds['upper_bound_pixels_float32']}"
                     ),
                     "ipdePrecision": (
-                        "explicit normalized derivative; scientific pixel-disparity output retained separately"
+                        "explicit normalized derivative; scientific pixel-disparity output selectable separately"
                     ),
                     "ipdeColorMatching": color_matching_description,
                 },
@@ -1049,6 +1050,49 @@ def _displacement_pending_outputs(
             )
         )
     return pending
+
+
+# Product IDs are stable within a decoded inventory and also serve as CLI selectors.
+_SPATIAL_PRODUCTS = {
+    "raft-height": ("RAFT height — raw pixel disparity", "derived_raft_stereo_height_map"),
+    "raft-displacement": ("RAFT height — 0–1 displacement", "derived_raft_stereo_displacement_0_to_1"),
+    "raft-flow": ("RAFT signed flow — pixels", "derived_raft_stereo_signed_flow"),
+    "raft-depth": ("RAFT distance — meters", "derived_raft_stereo_metric_depth"),
+    "stereo-height": ("Classical stereo height — raw pixel disparity", "derived_stereo_matching_height_map"),
+    "stereo-displacement": ("Classical stereo height — 0–1 displacement", "derived_stereo_matching_displacement_0_to_1"),
+}
+
+
+def _available_products(discovery: Discovery) -> list[dict[str, Any]]:
+    products = []
+    for index, asset in enumerate(discovery.assets):
+        common = {"asset_index": index, "width": asset.array.shape[1], "height": asset.array.shape[0]}
+        products.append({**common, "id": f"raw:{index}", "name": f"{asset.semantic_name} — original samples",
+                         "precision": asset.array.dtype.name})
+        if asset.kind == "depth":
+            try:
+                reconstruct_physical_disparity(asset.array, asset.metadata)
+            except MetricDepthError:
+                continue
+            for key, label in (("disparity", "Calibrated disparity — inverse meters"),
+                               ("meters", "Depth distance — meters")):
+                products.append({**common, "id": f"{key}:{index}", "name": f"{asset.semantic_name}: {label}",
+                                 "precision": "float32 EXR"})
+    if discovery.spatial_photo and discovery.spatial_photo.get("rectified_stereo_ready"):
+        camera = discovery.spatial_photo["left_camera"]
+        for key, (label, _) in _SPATIAL_PRODUCTS.items():
+            products.append({"id": key, "name": label, "width": camera["width"],
+                             "height": camera["height"], "precision": "float32 EXR"})
+    return products
+
+
+def _product_id(output: PendingOutput) -> str:
+    role = output.role.removesuffix("_exact_array")
+    for key, (_, spatial_role) in _SPATIAL_PRODUCTS.items():
+        if role == spatial_role:
+            return key
+    prefix = {"derived_physical_disparity": "disparity", "derived_metric_depth": "meters"}.get(role, "raw")
+    return f"{prefix}:{output.asset_index}"
 
 
 def _build_manifest(discovery: Discovery, asset_records: list[dict[str, Any]], warnings: list[str]) -> dict[str, Any]:
@@ -1091,6 +1135,7 @@ def _build_manifest(discovery: Discovery, asset_records: list[dict[str, Any]], w
             "explicitly identified inferred float32 estimates derived from the preserved stereo views. "
             "No output can restore information lost when the source HEIF was encoded."
         ),
+        "available_products": _available_products(discovery),
         "asset_count": len(asset_records),
         "assets": asset_records,
         "warnings": warnings,
@@ -1209,6 +1254,23 @@ def _check_output_paths(paths: list[Path], *, overwrite: bool) -> None:
 def extract_file(source: Path | str, options: ExtractOptions | None = None) -> dict[str, Any]:
     config = options or ExtractOptions()
     discovery = discover_file(Path(source))
+    selected = None if config.selected_products is None else set(config.selected_products)
+    if selected is not None:
+        available = {product["id"] for product in _available_products(discovery)}
+        if not selected or selected - available:
+            raise ExtractionError(f"Select available products from --inspect; unavailable selection: {sorted(selected - available)}")
+        config = replace(
+            config,
+            write_stereo_matching=bool(selected & {"stereo-height", "stereo-displacement"}),
+            write_raft_stereo=any(key.startswith("raft-") for key in selected),
+            write_raft_diagnostics=bool(selected & {"raft-flow", "raft-depth"}),
+            write_displacement_maps=bool(selected & {"raft-displacement", "stereo-displacement"}),
+            write_metric_depth=any(key.startswith("meters:") for key in selected),
+            write_physical_disparity=any(key.startswith("disparity:") for key in selected),
+        )
+    def wanted(output: PendingOutput) -> bool:
+        return selected is None or _product_id(output) in selected
+
     output_dir = (config.output_dir.expanduser().resolve() if config.output_dir else discovery.source.parent)
     output_dir.mkdir(parents=True, exist_ok=True)
     if not output_dir.is_dir():
@@ -1224,6 +1286,8 @@ def extract_file(source: Path | str, options: ExtractOptions | None = None) -> d
     pending: list[PendingOutput] = []
 
     for index, (asset, name) in enumerate(zip(discovery.assets, names, strict=True)):
+        if selected is not None and not selected.intersection({f"raw:{index}", f"meters:{index}", f"disparity:{index}"}):
+            continue
         base = output_dir / name
         try:
             pending.append(_exchange_output(base, asset, index))
@@ -1269,7 +1333,10 @@ def extract_file(source: Path | str, options: ExtractOptions | None = None) -> d
                 )
             )
 
-    manifest_path = output_dir / f"{discovery.source.stem}_aux_manifest.json"
+    pending = [item for item in pending if wanted(item)]
+    selection_suffix = "" if selected is None else "_" + hashlib.sha256(
+        "\n".join(sorted(selected)).encode("utf-8")).hexdigest()[:12]
+    manifest_path = output_dir / f"{discovery.source.stem}{selection_suffix}_aux_manifest.json"
     write_raft = config.write_raft_stereo or config.write_raft_diagnostics
     write_spatial_height = config.write_stereo_matching or write_raft
     if config.write_displacement_maps and not write_spatial_height:
@@ -1309,6 +1376,17 @@ def extract_file(source: Path | str, options: ExtractOptions | None = None) -> d
                     / f"{discovery.source.stem}_spatial_raft_stereo{color_suffix}_{suffix}"
                     for suffix in ("signed_flow", "depth_meters")
                 )
+        if selected is not None:
+            suffixes = {
+                "raft-height": f"raft_stereo{color_suffix}_height",
+                "raft-displacement": f"raft_stereo{color_suffix}_displacement_0_to_1",
+                "raft-flow": f"raft_stereo{color_suffix}_signed_flow",
+                "raft-depth": f"raft_stereo{color_suffix}_depth_meters",
+                "stereo-height": f"stereo_matching{color_suffix}_height",
+                "stereo-displacement": f"stereo_matching{color_suffix}_displacement_0_to_1",
+            }
+            predicted_bases = [base for base in predicted_bases
+                               if any(base.name.endswith("_" + suffixes[key]) for key in selected if key in suffixes)]
         predicted_paths = [Path(f"{base}.exr") for base in predicted_bases]
         if config.write_npy:
             predicted_paths.extend(Path(f"{base}.npy") for base in predicted_bases)
@@ -1423,26 +1501,27 @@ def extract_file(source: Path | str, options: ExtractOptions | None = None) -> d
                 )
             )
         if config.write_displacement_maps:
-            try:
-                displacement_maps, mapping_details = normalize_height_maps_for_displacement(
-                    height_maps
-                )
-            except DisplacementMappingError as exc:
-                raise ExtractionError(str(exc)) from exc
-            for engine_name, displacement_map in displacement_maps.items():
-                pending.extend(
-                    _displacement_pending_outputs(
-                        output_dir,
-                        discovery,
-                        left_asset_index,
-                        displacement_map,
-                        engine_name=engine_name,
-                        inference_details=inference_details[engine_name],
-                        mapping_details=mapping_details,
-                        color_matched=config.histogram_color_matching,
-                        write_npy_companions=config.write_npy,
-                    )
-                )
+            for engine_name, height_map in height_maps.items():
+                product = "raft-displacement" if engine_name == "raft_stereo" else "stereo-displacement"
+                if selected is not None and product not in selected:
+                    continue
+                try:
+                    displacement_maps, mapping_details = normalize_height_maps_for_displacement({engine_name: height_map})
+                except DisplacementMappingError as exc:
+                    raise ExtractionError(str(exc)) from exc
+                pending.extend(_displacement_pending_outputs(
+                    output_dir, discovery, left_asset_index, displacement_maps[engine_name],
+                    engine_name=engine_name, inference_details=inference_details[engine_name],
+                    mapping_details=mapping_details, color_matched=config.histogram_color_matching,
+                    write_npy_companions=config.write_npy,
+                ))
+        for engine_name, height_map in height_maps.items():
+            invalid = int(np.count_nonzero(~np.isfinite(height_map)))
+            if invalid:
+                warnings.append(f"{engine_name}: {invalid}/{height_map.size} pixels have no finite estimate; "
+                                "these remain NaN (often displayed black), not invented geometry.")
+
+    pending = [item for item in pending if wanted(item)]
 
     all_final_paths = [item.final_path for item in pending] + [manifest_path]
     _check_output_paths(all_final_paths, overwrite=config.overwrite)
@@ -1469,6 +1548,7 @@ def extract_file(source: Path | str, options: ExtractOptions | None = None) -> d
                 records[item.asset_index]["outputs"].append(output_record)
 
         manifest = _build_manifest(discovery, records, warnings)
+        manifest["selected_products"] = sorted(selected) if selected is not None else None
         manifest["manifest_path"] = str(manifest_path)
         manifest_temp = _temporary_path(manifest_path)
         created_temps.append(manifest_temp)
