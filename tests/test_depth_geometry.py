@@ -7,6 +7,7 @@ import numpy as np
 from ipde.spatial import (
     DisplacementMappingError, StereoMatchingOptions, correspondence_validity,
     linear_depth_displacement, register_stereo_rows, run_stereo_matching,
+    reverse_correspondence_support, stereo_photometric_support,
 )
 
 
@@ -16,7 +17,8 @@ class DepthGeometryTests(unittest.TestCase):
         forward = np.full((40, 96), 64, np.int16)  # four pixels, fixed point
         reverse = forward.copy()
         reverse[10:30, 36:56] = 192  # contradictory twelve-pixel match
-        with patch("cv2.StereoSGBM.create") as create:
+        with (patch("cv2.StereoSGBM.create") as create,
+              patch("ipde.spatial.stereo_photometric_support", return_value=(np.ones((40, 96), bool), {}))):
             create.return_value.compute.side_effect = [forward, reverse[:, ::-1]]
             result = run_stereo_matching(rgb, rgb, {
                 "left_camera": {"width": 96, "height": 40},
@@ -36,7 +38,8 @@ class DepthGeometryTests(unittest.TestCase):
         calibration = {"left_camera": {"width": 96, "height": 40},
                        "rectified_stereo_ready": True, "principal_point_delta_x_pixels": 0,
                        "focal_length_pixels_for_depth": 100, "baseline_meters": .1}
-        with patch("cv2.StereoSGBM.create") as create:
+        with (patch("cv2.StereoSGBM.create") as create,
+              patch("ipde.spatial.stereo_photometric_support", return_value=(np.ones((40, 96), bool), {}))):
             create.return_value.compute.side_effect = [forward, reverse[:, ::-1]]
             result = run_stereo_matching(rgb, rgb, calibration, StereoMatchingOptions(maximum_disparity=16))
         self.assertTrue(np.isnan(result.height_disparity_pixels[16:24, 48:56]).all())
@@ -109,6 +112,38 @@ class DepthGeometryTests(unittest.TestCase):
         self.assertFalse(details["applied"])
         self.assertIs(aligned, right)
         self.assertTrue(valid.all())
+
+    def test_flat_bidirectionally_consistent_regions_are_not_geometry(self):
+        rgb = np.full((64, 96, 3), 80, np.uint8)
+        fake = np.full((64, 96), 16, np.int16)
+        with patch("cv2.StereoSGBM.create") as create:
+            create.return_value.compute.side_effect = [fake, fake.copy()]
+            result = run_stereo_matching(rgb, rgb, {
+                "left_camera": {"width": 96, "height": 64},
+                "rectified_stereo_ready": True, "principal_point_delta_x_pixels": 0,
+            }, StereoMatchingOptions(maximum_disparity=16))
+        self.assertTrue(np.isnan(result.height_disparity_pixels).all())
+
+    def test_patch_support_accepts_exposure_change_but_rejects_false_disparity(self):
+        rng = np.random.default_rng(18)
+        left = rng.integers(30, 160, (64, 96, 3), np.uint8)
+        right = np.zeros_like(left)
+        right[:, :-8] = left[:, 8:] + 30
+        disparity = np.full((64, 96), 8, np.float32)
+        accepted, _ = stereo_photometric_support(left, right, disparity)
+        self.assertTrue(accepted[8:-8, 20:-12].all())
+        disparity[20:44, 30:70] = .0625
+        accepted, _ = stereo_photometric_support(left, right, disparity)
+        self.assertFalse(accepted[24:40, 34:66].any())
+
+    def test_reverse_flow_checks_sign_subpixel_neighbors_and_occlusion(self):
+        forward = np.full((2, 10), -2.5, np.float32)
+        reverse = np.full((2, 10), 2.5, np.float32)
+        reverse[1, 3] = 8
+        accepted = reverse_correspondence_support(forward, reverse)
+        self.assertFalse(accepted[:, :3].any())
+        self.assertTrue(accepted[0, 3:].all())
+        self.assertFalse(accepted[1, 5:7].any())
 
 
 if __name__ == "__main__":

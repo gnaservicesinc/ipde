@@ -15,7 +15,7 @@
 ########################
 
 //Path to a program.
-CMAKE_ADDR2LINE:FILEPATH=/usr/local/bin/addr2line
+CMAKE_ADDR2LINE:FILEPATH=CMAKE_ADDR2LINE-NOTFOUND
 
 //Path to a program.
 CMAKE_AR:FILEPATH=/usr/bin/ar
@@ -25,7 +25,7 @@ CMAKE_AR:FILEPATH=/usr/bin/ar
 CMAKE_BUILD_TYPE:STRING=
 
 //CXX compiler
-CMAKE_CXX_COMPILER:STRING=/usr/bin/c++
+CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/c++
 
 //Flags used by the CXX compiler during all build types.
 CMAKE_CXX_FLAGS:STRING=
@@ -43,7 +43,7 @@ CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG
 CMAKE_CXX_FLAGS_RELWITHDEBINFO:STRING=-O2 -g -DNDEBUG
 
 //Path to a program.
-CMAKE_DLLTOOL:FILEPATH=/usr/local/bin/dlltool
+CMAKE_DLLTOOL:FILEPATH=CMAKE_DLLTOOL-NOTFOUND
 
 //Flags used by the linker during all build types.
 CMAKE_EXE_LINKER_FLAGS:STRING=
@@ -103,7 +103,7 @@ CMAKE_INSTALL_LOCALSTATEDIR:PATH=var
 CMAKE_INSTALL_MANDIR:PATH=
 
 //Path to a program.
-CMAKE_INSTALL_NAME_TOOL:FILEPATH=/usr/local/bin/install_name_tool
+CMAKE_INSTALL_NAME_TOOL:FILEPATH=/usr/bin/install_name_tool
 
 //C header files for non-gcc (/usr/include)
 CMAKE_INSTALL_OLDINCLUDEDIR:PATH=/usr/include
@@ -127,7 +127,7 @@ CMAKE_INSTALL_SYSCONFDIR:PATH=etc
 CMAKE_LINKER:FILEPATH=/usr/bin/ld
 
 //Program used to build from build.ninja files.
-CMAKE_MAKE_PROGRAM:FILEPATH=/Library/Frameworks/Python.framework/Versions/3.14/bin/ninja
+CMAKE_MAKE_PROGRAM:FILEPATH=/Library/Frameworks/Python.framework/Versions/Current/bin/ninja
 
 //Flags used by the linker during the creation of modules during
 // all build types.
@@ -153,7 +153,7 @@ CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO:STRING=
 CMAKE_NM:FILEPATH=/usr/bin/nm
 
 //Path to a program.
-CMAKE_OBJCOPY:FILEPATH=/usr/local/bin/objcopy
+CMAKE_OBJCOPY:FILEPATH=CMAKE_OBJCOPY-NOTFOUND
 
 //Path to a program.
 CMAKE_OBJDUMP:FILEPATH=/usr/bin/objdump
@@ -209,7 +209,7 @@ CMAKE_PROJECT_VERSION_TWEAK:STATIC=
 CMAKE_RANLIB:FILEPATH=/usr/bin/ranlib
 
 //Path to a program.
-CMAKE_READELF:FILEPATH=/usr/local/bin/readelf
+CMAKE_READELF:FILEPATH=CMAKE_READELF-NOTFOUND
 
 //Flags used by the linker during the creation of shared libraries
 // during all build types.
@@ -283,7 +283,7 @@ IPDE_PYTHON_EXECUTABLE:FILEPATH=/opt/ipde/ipde/.venv/bin/python
 IPDE_SOURCE_DIR:STATIC=/opt/ipde/ipde
 
 //Path to a program.
-MACDEPLOYQT_EXECUTABLE:FILEPATH=/opt/Qt/6.11.1/macos/bin/macdeployqt
+MACDEPLOYQT_EXECUTABLE:FILEPATH=/opt/Qt/6.11.2/macos/bin/macdeployqt
 
 //Include for the OpenGL GLU library
 OPENGL_GLU_INCLUDE_DIR:PATH=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/OpenGL.framework
@@ -501,7 +501,7 @@ CMAKE_STRIP-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_TAPI
 CMAKE_TAPI-ADVANCED:INTERNAL=1
 //uname command
-CMAKE_UNAME:INTERNAL=/usr/local/bin/uname
+CMAKE_UNAME:INTERNAL=/usr/bin/uname
 //ADVANCED property for variable: CMAKE_VERBOSE_MAKEFILE
 CMAKE_VERBOSE_MAKEFILE-ADVANCED:INTERNAL=1
 //Deprecated.  Use -W[no-]deprecated instead.

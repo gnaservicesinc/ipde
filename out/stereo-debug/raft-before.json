@@ -1,0 +1,66 @@
+{
+  "engine": "RAFT-Stereo",
+  "upstream_repository": "https://github.com/princeton-vl/RAFT-Stereo",
+  "raft_source_root": "/opt/ipde/RAFT-Stereo",
+  "raft_source_commit": "6e93ed2169bd858dbb43033988563f3b0bb49506",
+  "checkpoint_path": "/opt/ipde/models/raftstereo-middlebury.pth",
+  "checkpoint_member": null,
+  "checkpoint_name": "raftstereo-middlebury.pth",
+  "checkpoint_sha256": "d22e84c0e431bf31d7cc66902c40601859eb40b35ef7f4399ea81276c2915819",
+  "torch_version": "2.14.0",
+  "device": "mps",
+  "iterations": 32,
+  "correlation_implementation": "alt",
+  "input_shape": [
+    2016,
+    2688,
+    3
+  ],
+  "input_dtype": "uint8",
+  "output_dtype": "float32",
+  "full_decoded_resolution": true,
+  "resized_or_tiled": false,
+  "vertical_registration": {
+    "applied": true,
+    "raw_assets_modified": false,
+    "horizontal_coordinates_changed": false,
+    "reference_view": "left",
+    "method": "SIFT ratio matches; deterministic RANSAC vertical affine fit",
+    "reason": "measured vertical misregistration",
+    "feature_match_count": 3697,
+    "inlier_count": 3553,
+    "median_vertical_error_before_pixels": 2.107421875,
+    "median_vertical_error_after_pixels": 0.20607962965061777,
+    "p90_vertical_error_after_pixels": 0.5643883712127639,
+    "right_to_aligned_affine": [
+      [
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        -0.00018432556497253246,
+        0.9979163859536656,
+        2.1014696018440686
+      ]
+    ],
+    "interpolation": "OpenCV INTER_LINEAR; uint8 inference input only",
+    "invalid_border_pixels": 13991
+  },
+  "out_of_view_pixel_count": 128359,
+  "signed_flow_semantics": "horizontal x_right - x_left correspondence displacement in pixels",
+  "height_map_formula": "(cx_right - cx_left) - signed_flow_pixels; negative/nonfinite is NaN",
+  "height_map_units": "pixels",
+  "height_map_value_direction": "larger values generally indicate nearer geometry",
+  "metric_depth_formula": "float32(focal_length_pixels * baseline_meters) / height_disparity_pixels",
+  "metric_depth_units": "meters",
+  "metric_depth_value_direction": "smaller values indicate nearer geometry",
+  "focal_length_pixels": 1948.3553466796875,
+  "baseline_meters": 0.01927199959754944,
+  "principal_point_delta_x_pixels": 0.0,
+  "finite_metric_depth_count": 5290649,
+  "nonfinite_metric_depth_count": 128359,
+  "apple_disparity_adjustment_applied_to_geometry": false,
+  "apple_disparity_adjustment_reason": "It is a presentation zero-parallax shift, not an optical calibration term.",
+  "precision_scope": "The float32 arrays preserve the model output and documented float32 derivations exactly. RAFT-Stereo is an inferred estimate, not a measured or mathematically exact source depth map."
+}

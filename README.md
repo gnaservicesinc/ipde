@@ -14,6 +14,15 @@ gamma correction, tone mapping, color enhancement, range stretching, or
 normalization. A separately named metric-depth EXR is an explicit, documented
 calibration and never replaces the raw depth PNG/NPY.
 
+The GUI separates **Source precision** from **Export storage**. Generated RAFT,
+classical, and calibrated float32 products are not images stored in the HEIC.
+On macOS, **Apple native disparity/depth** also preserves ImageIO's float16 or
+float32 buffer in an EXR of the same precision, including its accuracy metadata.
+This is a decoded representation: an 8-bit encoded disparity plane can become
+Apple float16 values without gaining more than its 256 original levels. The
+encoded codes remain available separately. Apple's `relative` accuracy flag is
+reported; such a map is not a guarantee of absolute scene distances.
+
 There is an important distinction between *decoded-sample preservation* and the
 original scene:
 
@@ -70,8 +79,8 @@ reports why calibrated products were skipped.
 
 Apple Spatial Video uses stereo MV-HEVC, but an Apple Spatial Photo is a stereo
 HEIC: two same-sized top-level images in an ImageIO `StereoPair` group. On macOS,
-IPDE reads that group and its camera model from ImageIO while continuing to use
-`pillow-heif` as the only pixel decoder. ImageIO receives the same immutable file
+IPDE reads that group and its camera model from ImageIO while using
+`pillow-heif` to decode the stereo and encoded auxiliary images. ImageIO receives the same immutable file
 snapshot as pillow-heif, so the group metadata and decoded samples cannot come
 from different versions of a file.
 
@@ -83,6 +92,12 @@ For every validated Spatial Photo, normal extraction writes:
 - the left/right indices, camera intrinsics, extrinsic positions/rotations,
   baseline, orientation, stereo aggressors, and disparity adjustment in the
   manifest.
+
+If the photo has a separate monoscopic display image, `<name>_display.png`
+preserves its own full resolution and framing. Resizing it does not register it
+to either stereo view. Stereo outputs align to the **left stereo view**, not
+the display image or embedded depth grid. Decoded stereo dimensions must match
+the associated camera calibration; IPDE refuses substitutions or implicit resizing.
 
 The raw arrays are not rotated for display. They stay in the stored coordinate
 system to remain registered with the camera intrinsics; the EXIF orientation is
@@ -99,11 +114,20 @@ pixel-disparity maps:
   pixels rejected by the matcher are explicit `NaN` values. An independent reverse
   match must agree within one pixel at both bracketing coordinates. Small disparity
   components (200 pixels or fewer, with a two-pixel neighbor tolerance) are rejected
-  after consistency checking; accepted sample values are never smoothed or filled.
+  after consistency and photometric checking. A 9×9 patch must have correlation
+  at least 0.8 and structure-tensor minimum eigenvalue at least 1 code² in both
+  views. Flat surfaces and single edges can otherwise agree on a false near-zero
+  disparity in both directions, producing enormous false distances. These checks
+  reject unsupported values as NaN; accepted samples are never smoothed or filled.
 - `<name>_spatial_raft_stereo_height.exr` uses the official
   [Princeton RAFT-Stereo](https://github.com/princeton-vl/RAFT-Stereo) model. It is
-  normally dense, including in blank or occluded regions where classical matching
-  has no reliable correspondence.
+  checked against an independent mirrored reverse inference. The forward and
+  reverse correspondences must agree within one pixel at both bracketing
+  coordinates; failures become NaN in depth/disparity/displacement. The signed
+  flow diagnostic retains the untouched forward result. This roughly doubles
+  inference time. Learned convex upsampling from the model's internal coarse
+  grid can still smooth fine detail: native-sized output is not evidence of
+  independent measurements at every pixel.
 
 Exact `.npy` companions are included when **Write exact .npy companions** is
 selected. `--stereo-matching` and `--raft-stereo` select either height map

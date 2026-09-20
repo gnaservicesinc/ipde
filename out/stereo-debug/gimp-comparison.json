@@ -1,0 +1,16 @@
+{
+  "left": {
+    "gimp_reference": "ch",
+    "matches": 2876,
+    "median_position_error_pixels": 0.00855148289934871,
+    "p90_position_error_pixels": 0.046535167244195264,
+    "rgb_mae_codes": 1.5234189849261464
+  },
+  "right": {
+    "gimp_reference": "ch2",
+    "matches": 2883,
+    "median_position_error_pixels": 0.007231056259580023,
+    "p90_position_error_pixels": 0.049626708759004434,
+    "rgb_mae_codes": 1.6150623878023431
+  }
+}

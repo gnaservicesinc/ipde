@@ -251,12 +251,16 @@ def _metadata_blocks(image: Any) -> list[dict[str, Any]]:
 
 def _source_bit_depth(image: Any, fallback: int = 0) -> int:
     c_image = getattr(image, "_c_image", None)
-    value = getattr(c_image, "bit_depth", fallback) if c_image is not None else fallback
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        match = re.search(r";(10|12|16)", str(getattr(image, "mode", "")))
-        return int(match.group(1)) if match else int(fallback or 8)
+    # Public bit_depth is encoded precision, whereas mode/dtype describe storage.
+    for value in ((getattr(image, "info", {}) or {}).get("bit_depth"),
+                  getattr(c_image, "bit_depth", None), fallback):
+        try:
+            if int(value) > 0:
+                return int(value)
+        except (TypeError, ValueError):
+            pass
+    match = re.search(r";(10|12|16)", str(getattr(image, "mode", "")))
+    return int(match.group(1)) if match else 8
 
 
 def _camel_to_snake(text: str) -> str:
@@ -468,6 +472,13 @@ def discover_file(source: Path) -> Discovery:
         )
         for role, image_index, camera in roles:
             image = heif[image_index]
+            decoded = _array_copy(image)
+            if decoded.shape[:2] != (camera["height"], camera["width"]):
+                raise ExtractionError(
+                    f"{role} stereo image {image_index} decoded at {decoded.shape[1]}x{decoded.shape[0]}, "
+                    f"but its camera calibration describes {camera['width']}x{camera['height']}; "
+                    "refusing a display-image substitution or implicit resize"
+                )
             if 0 <= image_index < len(image_contexts):
                 image_contexts[image_index]["spatial_role"] = role
             assets.append(
@@ -475,7 +486,7 @@ def discover_file(source: Path) -> Discovery:
                     kind="spatial_view",
                     parent_image_index=image_index,
                     ordinal=0,
-                    array=_array_copy(image),
+                    array=decoded,
                     mode=image.mode,
                     source_bit_depth=_source_bit_depth(
                         image, int(image.info.get("bit_depth", 0) or 0)
@@ -491,6 +502,38 @@ def discover_file(source: Path) -> Discovery:
                     },
                 )
             )
+
+    # Append representations so existing raw product indices remain stable.
+    for native in (imageio_metadata or {}).get("native_depth_images", []):
+        parent = native["parent_image_index"]
+        encoded = [a for a in assets if a.kind == "depth" and a.parent_image_index == parent]
+        encoded_bits = encoded[0].source_bit_depth if len(encoded) == 1 else 0
+        for asset in encoded:
+            asset.metadata["apple_depth_accuracy"] = native["accuracy"]
+            asset.metadata["apple_native_dtype"] = native["array"].dtype.name
+        assets.append(Asset(
+            kind="native_depth", parent_image_index=parent, ordinal=0,
+            array=native["array"], mode=native["array"].dtype.name,
+            source_bit_depth=encoded_bits, semantic_name=f"apple_{native['semantic']}",
+            metadata={"decoder": "macOS ImageIO native depth buffer", "representation": native["semantic"],
+                      "accuracy": native["accuracy"], "description": native["description"],
+                      "encoded_source_bit_depth": encoded_bits or None,
+                      "native_storage_bit_depth": native["array"].dtype.itemsize * 8,
+                      "precision_note": "Apple's decoded floating-point representation; not additional captured precision"},
+            metadata_blocks=[{"type": "mime", "content_type": "application/rdf+xml", "data": native["xmp"]}]
+            if native["xmp"] else [],
+        ))
+    if spatial_photo is not None:
+        mono = spatial_photo.get("monoscopic_image_index")
+        if isinstance(mono, int) and mono not in (left_index, right_index) and 0 <= mono < len(heif):
+            image = heif[mono]
+            assets.append(Asset(
+                kind="display_view", parent_image_index=mono, ordinal=0,
+                array=_array_copy(image), mode=image.mode, source_bit_depth=_source_bit_depth(image),
+                semantic_name="display", metadata={"spatial_role": "monoscopic_display",
+                    "coordinate_system": "separate display image; not the stereo or depth reference grid",
+                    "stereo_input": False},
+            ))
 
     return Discovery(
         source=path,
@@ -533,6 +576,7 @@ def _asset_record(asset: Asset) -> dict[str, Any]:
         "aux_id": asset.aux_id,
         "mode": asset.mode,
         "source_bit_depth": asset.source_bit_depth,
+        "decoded_storage_bit_depth": array.dtype.itemsize * 8,
         "dtype": array.dtype.str,
         "dtype_name": array.dtype.name,
         "shape": list(array.shape),
@@ -598,11 +642,17 @@ def _exchange_output(path_base: Path, asset: Asset, asset_index: int) -> Pending
         array.ndim == 2 or (array.ndim == 3 and array.shape[2] in (1, 2, 3, 4))
     ):
         path = Path(f"{path_base}.exr")
+        attributes = {}
+        if asset.kind == "native_depth":
+            attributes = {"ipdeDecoder": "macOS ImageIO native depth buffer",
+                          "ipdeDepthAccuracy": asset.metadata.get("accuracy") or "unspecified",
+                          "ipdeEncodedSourceBits": str(asset.source_bit_depth or "unknown"),
+                          "ipdeSemantic": str(asset.metadata.get("representation", "depth"))}
         return PendingOutput(
             final_path=path,
             role="lossless_exchange",
             asset_index=asset_index,
-            write=lambda temp, a=array: write_exr(temp, a),
+            write=lambda temp, a=array, attrs=attributes: write_exr(temp, a, attributes=attrs),
             verify=lambda temp, a=array: verify_exr(temp, a),
         )
     raise FormatError(
@@ -1072,9 +1122,25 @@ _SPATIAL_PRODUCTS = {
 def _available_products(discovery: Discovery) -> list[dict[str, Any]]:
     products = []
     for index, asset in enumerate(discovery.assets):
-        common = {"asset_index": index, "width": asset.array.shape[1], "height": asset.array.shape[0]}
-        products.append({**common, "id": f"raw:{index}", "name": f"{asset.semantic_name} — original samples",
-                         "precision": asset.array.dtype.name})
+        common = {"asset_index": index, "width": asset.array.shape[1], "height": asset.array.shape[0],
+                  "channels": asset.array.shape[2] if asset.array.ndim == 3 else 1}
+        storage = f"{asset.array.dtype.itemsize * 8}-bit {'float EXR' if asset.array.dtype.kind == 'f' else 'integer PNG'}"
+        source_precision = f"{asset.source_bit_depth}-bit encoded" if asset.source_bit_depth else "Encoded precision unavailable"
+        description = "Original decoded code values; no gamma, normalization, or resampling."
+        name = f"{asset.semantic_name} — original samples"
+        if asset.kind == "native_depth":
+            name = f"Apple native {asset.metadata['representation']} — decoded values"
+            description = (f"Apple ImageIO {asset.array.dtype.name}; accuracy: {asset.metadata['accuracy'] or 'unspecified'}. "
+                           "A decoded floating-point representation, not additional encoded precision.")
+        elif asset.kind == "display_view":
+            name = "Display image — separate camera grid"
+            description = "The full-size monoscopic image has its own framing. Stereo results align to spatial_left, not this display image."
+        elif asset.kind == "spatial_view":
+            description = f"HEIF image {asset.parent_image_index}; full native stereo dimensions. Results use the left view's pixel grid."
+        products.append({**common, "id": f"raw:{index}",
+                         "precision": storage, "name": name, "source_precision": source_precision,
+                         "origin": "Apple decoded" if asset.kind == "native_depth" else "Embedded image",
+                         "description": description})
         if asset.kind == "depth":
             try:
                 reconstruct_physical_disparity(asset.array, asset.metadata)
@@ -1083,12 +1149,17 @@ def _available_products(discovery: Discovery) -> list[dict[str, Any]]:
             for key, label in (("disparity", "Calibrated disparity — inverse meters"),
                                ("meters", "Depth distance — meters")):
                 products.append({**common, "id": f"{key}:{index}", "name": f"{asset.semantic_name}: {label}",
-                                 "precision": "float32 EXR"})
+                                 "precision": "32-bit float EXR", "source_precision": source_precision,
+                                 "origin": "Calculated", "description": "Calculated from encoded depth codes. Float32 is export storage, not import bit depth. "
+                                 f"Apple depth accuracy: {asset.metadata.get('apple_depth_accuracy') or 'unspecified'}."})
     if discovery.spatial_photo and discovery.spatial_photo.get("rectified_stereo_ready"):
         camera = discovery.spatial_photo["left_camera"]
         for key, (label, _) in _SPATIAL_PRODUCTS.items():
             products.append({"id": key, "name": label, "width": camera["width"],
-                             "height": camera["height"], "precision": "float32 EXR"})
+                             "height": camera["height"], "precision": "32-bit float EXR",
+                             "source_precision": "Generated estimate", "origin": "Inferred",
+                             "description": "Computed from the full-size stereo pair on the left-view grid. "
+                             "Not an embedded image or measured source depth. Model smoothing and occlusion limit reconstruction detail."})
     return products
 
 
@@ -1134,6 +1205,8 @@ def _build_manifest(discovery: Discovery, asset_records: list[dict[str, Any]], w
         },
         "precision_scope": (
             "Raw output samples are bit-exact copies of pillow-heif/libheif decoded arrays. "
+            "Apple native depth assets separately preserve the ImageIO float16/float32 buffers bit-for-bit; "
+            "native storage precision and encoded source precision are reported independently. "
             "Derived physical disparity and metric depth outputs, when present, are explicitly "
             "documented float32 calibrations of a raw uint8 uniform-disparity plane. Float32 changes "
             "the numeric representation and units, not the source quantization or amount of captured "
@@ -1152,6 +1225,8 @@ def _discovery_warnings(discovery: Discovery) -> list[str]:
     warnings: list[str] = []
     if discovery.spatial_metadata_warning:
         warnings.append(discovery.spatial_metadata_warning)
+    if any(a.kind == "native_depth" and a.metadata.get("accuracy") == "relative" for a in discovery.assets):
+        warnings.append("Apple labels this embedded depth as relative accuracy; its calibrated values are not guaranteed absolute scene distances.")
     if discovery.spatial_photo:
         for aggressor in discovery.spatial_photo.get("stereo_aggressors", []):
             if isinstance(aggressor, Mapping):

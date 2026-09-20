@@ -79,7 +79,7 @@ class MainWindow final : public QMainWindow {
 public:
     MainWindow() {
         setWindowTitle(QStringLiteral("IPDE — Precision HEIF Auxiliary Extractor"));
-        resize(1100, 780);
+        resize(1300, 780);
         setAcceptDrops(true);
 
         auto *central = new QWidget(this);
@@ -101,11 +101,12 @@ public:
         root->addWidget(subtitle);
 
         files_ = new QTreeWidget(central);
-        files_->setColumnCount(3);
-        files_->setHeaderLabels({QStringLiteral("Source / output — check only what you want"), QStringLiteral("Status / dimensions"), QStringLiteral("Precision")});
+        files_->setColumnCount(4);
+        files_->setHeaderLabels({QStringLiteral("Source / output — check only what you want"), QStringLiteral("Status / dimensions"), QStringLiteral("Source precision"), QStringLiteral("Export storage")});
         files_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
         files_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
         files_->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+        files_->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
         files_->setSelectionMode(QAbstractItemView::ExtendedSelection);
         files_->setAlternatingRowColors(true);
         root->addWidget(files_, 1);
@@ -208,8 +209,9 @@ public:
         });
         auto *help = new QLabel(QStringLiteral(
             "Check individual outputs, then Export checked. Or select one row and click Export this map. "
-            "For physical relief choose RAFT linear depth — 0–1 displacement. Raw pixel disparity is inverse depth and can look white "
-            "in a 0–1 viewer; unmatched classical pixels remain NaN."), central);
+            "Stereo outputs use the left view's pixel grid; the separate display image can have different framing. "
+            "Source precision describes the encoded data. Float EXR storage also holds calculated and inferred values. "
+            "Unsupported stereo matches remain NaN."), central);
         help->setWordWrap(true);
         root->addWidget(help);
 
@@ -514,7 +516,10 @@ private:
                     auto *child = new QTreeWidgetItem(root);
                     child->setText(0, product.value(QStringLiteral("name")).toString());
                     child->setText(1, dimensionText(product));
-                    child->setText(2, product.value(QStringLiteral("precision")).toString());
+                    child->setText(2, product.value(QStringLiteral("source_precision")).toString());
+                    child->setText(3, product.value(QStringLiteral("precision")).toString());
+                    const auto description = product.value(QStringLiteral("description")).toString();
+                    for (int column = 0; column < 4; ++column) child->setToolTip(column, description);
                     child->setData(0, Qt::UserRole + 1, id);
                     child->setFlags(child->flags() | Qt::ItemIsUserCheckable);
                     child->setCheckState(0, checked.contains(id) ? Qt::Checked : Qt::Unchecked);

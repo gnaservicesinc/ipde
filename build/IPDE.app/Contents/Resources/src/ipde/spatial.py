@@ -804,6 +804,57 @@ def correspondence_validity(signed_flow: np.ndarray, right_valid: np.ndarray) ->
     return valid & right_valid[rows, lo] & right_valid[rows, hi]
 
 
+def stereo_photometric_support(
+    left: np.ndarray, right: np.ndarray, disparity: np.ndarray,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Reject unsupported classical matches without changing accepted disparities.
+
+    Bidirectional SGBM can agree on a false match in flat patches or along a
+    single edge (the aperture problem). Require local contrast in two directions
+    in both views and a positive, exposure-independent patch correlation.
+    """
+    import cv2
+
+    left_gray = cv2.cvtColor(left, cv2.COLOR_RGB2GRAY).astype(np.float32)
+    right_gray = cv2.cvtColor(right, cv2.COLOR_RGB2GRAY).astype(np.float32)
+    yy, xx = np.indices(disparity.shape, dtype=np.float32)
+    xr = xx - np.where(np.isfinite(disparity), disparity, 0)
+    warped = cv2.remap(right_gray, xr, yy, cv2.INTER_LINEAR)
+    # Float64 moments avoid catastrophic cancellation on nearly flat uint8 data.
+    a, b = left_gray.astype(np.float64), warped.astype(np.float64)
+    def mean(value: np.ndarray) -> np.ndarray:
+        return cv2.boxFilter(value, -1, (9, 9), normalize=True)
+    ma, mb = mean(a), mean(b)
+    va = np.maximum(0, mean(a * a) - ma * ma)
+    vb = np.maximum(0, mean(b * b) - mb * mb)
+    covariance = mean(a * b) - ma * mb
+    correlation = covariance / np.sqrt(np.maximum(va * vb, 1e-12))
+    left_texture = cv2.cornerMinEigenVal(left_gray, 9, 3)
+    right_texture = cv2.remap(cv2.cornerMinEigenVal(right_gray, 9, 3), xr, yy, cv2.INTER_LINEAR)
+    supported = ((correlation >= .8) & (left_texture >= 1.0) & (right_texture >= 1.0)
+                 & np.isfinite(disparity) & (xr >= 4) & (xr <= disparity.shape[1] - 5))
+    supported[:4] = False
+    supported[-4:] = False
+    supported[:, :4] = False
+    supported[:, -4:] = False
+    return supported, {
+        "method": "9x9 normalized patch correlation and two-direction structure tensor",
+        "minimum_correlation": .8, "minimum_structure_eigenvalue_code_squared": 1.0,
+        "policy": "unsupported estimates become NaN; accepted disparities are never smoothed or rescaled",
+    }
+
+
+def reverse_correspondence_support(forward: np.ndarray, reverse: np.ndarray) -> np.ndarray:
+    """Check x_right=x_left+forward and x_left=x_right+reverse at both neighbors."""
+    xr = np.arange(forward.shape[1], dtype=np.float32)[None, :] + forward
+    in_bounds = np.isfinite(xr) & (xr >= 0) & (xr <= forward.shape[1] - 1)
+    safe_x = np.where(in_bounds, xr, 0)
+    lo, hi = np.floor(safe_x).astype(np.intp), np.ceil(safe_x).astype(np.intp)
+    rows = np.arange(forward.shape[0])[:, None]
+    return (in_bounds & (np.abs(forward + reverse[rows, lo]) <= 1.0)
+            & (np.abs(forward + reverse[rows, hi]) <= 1.0))
+
+
 def linear_depth_displacement(
     disparity: np.ndarray, spatial: Mapping[str, Any],
 ) -> tuple[np.ndarray, dict[str, Any]]:
@@ -916,7 +967,8 @@ def run_stereo_matching(
         disparity + principal_point_delta, dtype=np.float32
     )
     in_bounds = correspondence_validity(-disparity, right_valid)
-    accepted = valid & (height >= 0) & in_bounds & consistent
+    photometric, support_details = stereo_photometric_support(left_array, right_array, disparity)
+    accepted = valid & (height > 0) & in_bounds & consistent & photometric
     # Consistency rejection can split formerly connected false matches into
     # islands. Filter *after* that rejection, retaining accepted codes exactly.
     checked_fixed = np.where(accepted, fixed_disparity, invalid_fixed_value).astype(np.int16)
@@ -938,6 +990,8 @@ def run_stereo_matching(
         "gamma_correction": False,
         "normalization": False,
         "vertical_registration": registration,
+        "photometric_support": support_details,
+        "photometrically_unsupported_pixel_count": int(np.count_nonzero(valid & ~photometric)),
         "out_of_view_pixel_count": int(np.count_nonzero(~in_bounds)),
         "left_right_consistency": "independent reverse match; both neighbors within 1 pixel",
         "inconsistent_pixel_count": int(np.count_nonzero(valid & ~consistent)),
@@ -1101,13 +1155,28 @@ def run_raft_stereo(
                     iters=options.iterations,
                     test_mode=True,
                 )
+                # Mirroring the reverse pair retains the disparity sign expected
+                # by pretrained stereo models. Convert back to right coordinates.
+                _, reverse_flow = model(
+                    torch.flip(right_padded, dims=[3]),
+                    torch.flip(left_padded, dims=[3]),
+                    iters=options.iterations,
+                    test_mode=True,
+                )
         unpadded = padder.unpad(flow)
         signed_flow = np.ascontiguousarray(
             unpadded[0, 0].to(device="cpu", dtype=torch.float32).numpy(),
             dtype=np.float32,
         )
+        reverse_signed_flow = np.ascontiguousarray(
+            -padder.unpad(torch.flip(reverse_flow, dims=[3]))[0, 0]
+            .to(device="cpu", dtype=torch.float32).numpy(), dtype=np.float32,
+        )
+        if signed_flow.shape != left_array.shape[:2] or reverse_signed_flow.shape != signed_flow.shape:
+            raise RaftStereoError("RAFT-Stereo returned a flow grid that does not match the full input resolution")
         del (
             flow,
+            reverse_flow,
             unpadded,
             left_padded,
             right_padded,
@@ -1130,8 +1199,10 @@ def run_raft_stereo(
 
     height_disparity, depth_meters = derive_raft_height_and_depth(signed_flow, spatial)
     in_bounds = correspondence_validity(signed_flow, right_valid)
-    height_disparity[~in_bounds] = np.float32(np.nan)
-    depth_meters[~in_bounds] = np.float32(np.nan)
+    consistent = reverse_correspondence_support(signed_flow, reverse_signed_flow)
+    accepted = in_bounds & consistent & (height_disparity > 0)
+    height_disparity[~accepted] = np.float32(np.nan)
+    depth_meters[~accepted] = np.float32(np.nan)
     principal_point_delta = np.float32(spatial["principal_point_delta_x_pixels"])
     focal_length = np.float32(spatial["focal_length_pixels_for_depth"])
     baseline = np.float32(spatial["baseline_meters"])
@@ -1157,6 +1228,13 @@ def run_raft_stereo(
         "resized_or_tiled": False,
         "vertical_registration": registration,
         "out_of_view_pixel_count": int(np.count_nonzero(~in_bounds)),
+        "left_right_consistency": "independent mirrored reverse inference; both neighbors within 1 pixel",
+        "inconsistent_pixel_count": int(np.count_nonzero(in_bounds & ~consistent)),
+        "raw_signed_flow_filtered": False,
+        "input_left_sha256": _array_sha256(left_array),
+        "input_right_sha256": _array_sha256(right_array),
+        "model_internal_downsample_factor": 2 ** configuration.n_downsample,
+        "output_upsampling": "RAFT learned convex upsampling; full output size does not imply independent per-pixel measurements",
         "signed_flow_semantics": "horizontal x_right - x_left correspondence displacement in pixels",
         "height_map_formula": "(cx_right - cx_left) - signed_flow_pixels; negative/nonfinite is NaN",
         "height_map_units": "pixels",

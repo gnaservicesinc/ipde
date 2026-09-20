@@ -1,15 +1,19 @@
-"""Read Apple HEIF stereo-group metadata without decoding image samples.
+"""Read Apple HEIF stereo metadata and native floating-point depth buffers.
 
 ImageIO is the authoritative API for Apple's spatial-photo group and camera
-metadata.  pillow-heif remains the sole pixel decoder; this module only reads
-container properties from the same immutable byte snapshot.
+metadata. pillow-heif decodes the encoded image samples. Apple's separately
+labelled depth representation is copied byte-for-byte from ImageIO, with no
+conversion, resampling, or change of precision.
 """
 
 from __future__ import annotations
 
 import ctypes
 import sys
+import xml.etree.ElementTree as ET
 from typing import Any
+
+import numpy as np
 
 
 class ImageIOMetadataError(RuntimeError):
@@ -19,6 +23,23 @@ class ImageIOMetadataError(RuntimeError):
 _CF_STRING_ENCODING_UTF8 = 0x08000100
 _CF_NUMBER_SINT64 = 4
 _CF_NUMBER_FLOAT64 = 6
+
+
+def decode_native_depth_buffer(data: bytes, description: dict[str, Any]) -> np.ndarray:
+    """Remove row padding only; retain the native float16/float32 bit patterns."""
+    formats = {int.from_bytes(code, "big"): dtype for code, dtype in (
+        (b"hdis", "=f2"), (b"fdis", "=f4"), (b"hdep", "=f2"), (b"fdep", "=f4"),
+    )}
+    try:
+        dtype = np.dtype(formats[int(description["PixelFormat"])])
+        width, height = int(description["Width"]), int(description["Height"])
+        stride = int(description["BytesPerRow"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ImageIOMetadataError("unsupported Apple native depth buffer description") from exc
+    if width <= 0 or height <= 0 or stride < width * dtype.itemsize or len(data) < stride * height:
+        raise ImageIOMetadataError("invalid dimensions, stride, or truncated Apple native depth buffer")
+    return np.ndarray((height, width), dtype=dtype, buffer=data,
+                      strides=(stride, dtype.itemsize)).copy(order="C")
 
 
 class _ImageIOBridge:
@@ -106,6 +127,12 @@ class _ImageIOBridge:
         self.imageio.CGImageSourceCopyPropertiesAtIndex.restype = pointer
         self.imageio.CGImageSourceGetCount.argtypes = [pointer]
         self.imageio.CGImageSourceGetCount.restype = index
+        self.imageio.CGImageSourceCopyAuxiliaryDataInfoAtIndex.argtypes = [pointer, index, pointer]
+        self.imageio.CGImageSourceCopyAuxiliaryDataInfoAtIndex.restype = pointer
+        self.imageio.CGImageMetadataCreateXMPData.argtypes = [pointer, pointer]
+        self.imageio.CGImageMetadataCreateXMPData.restype = pointer
+        self.cf.CFDictionaryGetValue.argtypes = [pointer, pointer]
+        self.cf.CFDictionaryGetValue.restype = pointer
 
         self.type_ids = {
             self.cf.CFStringGetTypeID(): "string",
@@ -231,6 +258,7 @@ class _ImageIOBridge:
                 {"{Groups}", "PrimaryImage"},
             )
             images: list[dict[str, Any]] = []
+            native_depths: list[dict[str, Any]] = []
             image_count = int(self.imageio.CGImageSourceGetCount(source))
             if image_count < 0 or image_count > 100_000:
                 raise ImageIOMetadataError("ImageIO returned an invalid image count")
@@ -250,10 +278,12 @@ class _ImageIOBridge:
                     )
                 finally:
                     self.cf.CFRelease(properties)
+                native_depths.extend(self._native_depths(source, image_index))
             return {
                 "groups": global_subset.get("{Groups}", []),
                 "primary_image_index": global_subset.get("PrimaryImage"),
                 "images": images,
+                "native_depth_images": native_depths,
             }
         finally:
             if global_properties:
@@ -261,6 +291,47 @@ class _ImageIOBridge:
             if source:
                 self.cf.CFRelease(source)
             self.cf.CFRelease(data)
+
+    def _native_depths(self, source: int, image_index: int) -> list[dict[str, Any]]:
+        records = []
+        for name, semantic in (("kCGImageAuxiliaryDataTypeDisparity", "disparity"),
+                               ("kCGImageAuxiliaryDataTypeDepth", "depth")):
+            aux_type = ctypes.c_void_p.in_dll(self.imageio, name)
+            info = self.imageio.CGImageSourceCopyAuxiliaryDataInfoAtIndex(source, image_index, aux_type)
+            if not info:
+                continue
+            try:
+                values = self._dictionary_subset(info, {"kCGImageAuxiliaryDataInfoData",
+                                                       "kCGImageAuxiliaryDataInfoDataDescription"})
+                description = values["kCGImageAuxiliaryDataInfoDataDescription"]
+                array = decode_native_depth_buffer(values["kCGImageAuxiliaryDataInfoData"], description)
+                meta_key = ctypes.c_void_p.in_dll(self.imageio, "kCGImageAuxiliaryDataInfoMetadata")
+                metadata = self.cf.CFDictionaryGetValue(info, meta_key)
+                xmp = self.imageio.CGImageMetadataCreateXMPData(metadata, None) if metadata else None
+                xmp_bytes = b""
+                if xmp:
+                    try:
+                        xmp_bytes = self._convert(xmp)
+                    finally:
+                        self.cf.CFRelease(xmp)
+                accuracy = None
+                if xmp_bytes:
+                    try:
+                        root = ET.fromstring(xmp_bytes)
+                        for element in root.iter():
+                            for key, value in element.attrib.items():
+                                if key.endswith("}Accuracy"):
+                                    accuracy = value
+                            if element.tag.endswith("}Accuracy"):
+                                accuracy = element.text
+                    except ET.ParseError as exc:
+                        raise ImageIOMetadataError("invalid Apple depth XMP metadata") from exc
+                records.append({"parent_image_index": image_index, "semantic": semantic,
+                                "array": array, "description": description,
+                                "accuracy": accuracy, "xmp": xmp_bytes})
+            finally:
+                self.cf.CFRelease(info)
+        return records
 
 
 def read_apple_imageio_metadata(source_bytes: bytes) -> dict[str, Any] | None:

@@ -1,0 +1,1589 @@
+{
+  "schema": "ipde-extraction-manifest-v1",
+  "source": {
+    "path": "/Users/andrewsmith/Downloads/IMG_0835.HEIC",
+    "filename": "IMG_0835.HEIC",
+    "size_bytes": 3705032,
+    "sha256": "a5e2368b7f8e2d97dc3cd866f84ee02f314282d76d1c7e60624ec63f71d2d879",
+    "mimetype": "image/heic",
+    "primary_image_index": 0,
+    "top_level_images": [
+      {
+        "mode": "RGB",
+        "size": [
+          5712,
+          4284
+        ],
+        "source_bit_depth": 8,
+        "primary": true,
+        "has_alpha": false,
+        "premultiplied_alpha": false,
+        "thumbnail_sizes": [
+          416
+        ],
+        "depth_image_count": 1,
+        "auxiliary_images": {
+          "urn:com:apple:photo:2020:aux:hdrgainmap": [
+            63
+          ]
+        },
+        "tiling": {
+          "num_columns": 9,
+          "num_rows": 5,
+          "tile_width": 640,
+          "tile_height": 896,
+          "image_width": 5712,
+          "image_height": 4284
+        },
+        "pixel_aspect_ratio": null,
+        "chroma": 1,
+        "colorspace": 0,
+        "color_profile": {
+          "type": "prof",
+          "data": {
+            "encoding": "base64",
+            "length": 536,
+            "sha256": "0ff6958f98684c61f6bbdce1368ddeaf3873baf84545baba482e920d92a914c0",
+            "data": "AAACGGFwcGwEAAAAbW50clJHQiBYWVogB+YAAQABAAAAAAAAYWNzcEFQUEwAAAAAQVBQTAAAAAAAAAAAAAAAAAAAAAAAAPbWAAEAAAAA0y1hcHBsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKZGVzYwAAAPwAAAAwY3BydAAAASwAAABQd3RwdAAAAXwAAAAUclhZWgAAAZAAAAAUZ1hZWgAAAaQAAAAUYlhZWgAAAbgAAAAUclRSQwAAAcwAAAAgY2hhZAAAAewAAAAsYlRSQwAAAcwAAAAgZ1RSQwAAAcwAAAAgbWx1YwAAAAAAAAABAAAADGVuVVMAAAAUAAAAHABEAGkAcwBwAGwAYQB5ACAAUAAzbWx1YwAAAAAAAAABAAAADGVuVVMAAAA0AAAAHABDAG8AcAB5AHIAaQBnAGgAdAAgAEEAcABwAGwAZQAgAEkAbgBjAC4ALAAgADIAMAAyADJYWVogAAAAAAAA9tUAAQAAAADTLFhZWiAAAAAAAACD3wAAPb////+7WFlaIAAAAAAAAEq/AACxNwAACrlYWVogAAAAAAAAKDgAABELAADIuXBhcmEAAAAAAAMAAAACZmYAAPKnAAANWQAAE9AAAApbc2YzMgAAAAAAAQxCAAAF3v//8yYAAAeTAAD9kP//+6L///2jAAAD3AAAwG4="
+          }
+        },
+        "camera_intrinsic_matrix": null,
+        "camera_extrinsic_matrix_rotation": null,
+        "metadata_blocks": [
+          {
+            "type": "Exif",
+            "content_type": "",
+            "data": {
+              "encoding": "base64",
+              "length": 3028,
+              "sha256": "775a663775dbb64ce0983cb7c2c66e8cfc7f411289c7b212d18eb4b0854bbbb2",
+              "data": "AAAABkV4aWYAAE1NACoAAAAIAAsBDwACAAAABgAAAJIBEAACAAAAEgAAAJgBEgADAAAAAQABAAABGgAFAAAAAQAAAKoBGwAFAAAAAQAAALIBKAADAAAAAQACAAABMQACAAAABQAAALoBMgACAAAAFAAAAMABPAACAAAAEgAAANSHaQAEAAAAAQAAAOaIJQAEAAAAAQAACrQAAAAAQXBwbGUAaVBob25lIDE2IFBybyBNYXgAAAAASAAAAAEAAABIAAAAATI3LjIAADIwMjY6MDk6MTggMTg6MzU6MTYAaVBob25lIDE2IFBybyBNYXgAACGCmgAFAAAAAQAAAniCnQAFAAAAAQAAAoCIIgADAAAAAQACAACIJwADAAAAAQGQAACQAAAHAAAABDAyMzKQAwACAAAAFAAAAoiQBAACAAAAFAAAApyQEAACAAAABwAAArCQEQACAAAABwAAAriQEgACAAAABwAAAsCSAQAKAAAAAQAAAsiSAgAFAAAAAQAAAtCSAwAKAAAAAQAAAtiSBAAKAAAAAQAAAuCSBwADAAAAAQAFAACSCQADAAAAAQAQAACSCgAFAAAAAQAAAuiSFAADAAAABAAAAvCSfAAHAAAHXgAAAviSkQACAAAABDc0NQCSkgACAAAABDc0NQCgAQADAAAAAf//AACgAgAEAAAAAQAAFlCgAwAEAAAAAQAAELyiFwADAAAAAQACAACjAQAHAAAAAQEAAACkAgADAAAAAQAAAACkAwADAAAAAQAAAACkBQADAAAAAQAYAACkMgAFAAAABAAAClakMwACAAAABgAACnakNAACAAAANwAACnykYAADAAAAAQACAAAAAAAAAAAAAQAAADwAEvxMAAqqgTIwMjY6MDk6MTggMTg6MzU6MTYAMjAyNjowOToxOCAxODozNToxNgAtMDQ6MDAAAC0wNDowMAAALTA0OjAwAAAAAM+NAAAjIwAApqEAAGQnAADExgAA1BcAAAAAAAAAAQAD3MYAAJIpCyUIXgxGB11BcHBsZSBpT1MAAAFNTQA7AAEACQAAAAEAAAARAAIABwAAAgAAAALYAAMABwAAAGgAAATYAAQACQAAAAEAAAABAAUACQAAAAEAAACrAAYACQAAAAEAAACkAAcACQAAAAEAAAABAAgACgAAAAMAAAVAAAwACgAAAAIAAAVYAA0ACQAA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"
+            }
+          },
+          {
+            "type": "mime",
+            "content_type": "application/rdf+xml",
+            "data": {
+              "encoding": "base64",
+              "length": 1848,
+              "sha256": "47eacd56bbe4cc9ad02efac3c98f6740c13372110d2512d41503bf3161fb77ed",
+              "data": "PHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyIgeDp4bXB0az0iWE1QIENvcmUgNi4wLjAiPgogICA8cmRmOlJERiB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiPgogICAgICA8cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0iIgogICAgICAgICAgICB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iCiAgICAgICAgICAgIHhtbG5zOnBob3Rvc2hvcD0iaHR0cDovL25zLmFkb2JlLmNvbS9waG90b3Nob3AvMS4wLyIKICAgICAgICAgICAgeG1sbnM6bXdnLXJzPSJodHRwOi8vd3d3Lm1ldGFkYXRhd29ya2luZ2dyb3VwLmNvbS9zY2hlbWFzL3JlZ2lvbnMvIgogICAgICAgICAgICB4bWxuczpzdEFyZWE9Imh0dHA6Ly9ucy5hZG9iZS5jb20veG1wL3NUeXBlL0FyZWEjIgogICAgICAgICAgICB4bWxuczpzdERpbT0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wL3NUeXBlL0RpbWVuc2lvbnMjIj4KICAgICAgICAgPHhtcDpDcmVhdGVEYXRlPjIwMjYtMDktMThUMTg6MzU6MTY8L3htcDpDcmVhdGVEYXRlPgogICAgICAgICA8eG1wOkNyZWF0b3JUb29sPjI3LjI8L3htcDpDcmVhdG9yVG9vbD4KICAgICAgICAgPHhtcDpNb2RpZnlEYXRlPjIwMjYtMDktMThUMTg6MzU6MTY8L3htcDpNb2RpZnlEYXRlPgogICAgICAgICA8cGhvdG9zaG9wOkRhdGVDcmVhdGVkPjIwMjYtMDktMThUMTg6MzU6MTY8L3Bob3Rvc2hvcDpEYXRlQ3JlYXRlZD4KICAgICAgICAgPG13Zy1yczpSZWdpb25zIHJkZjpwYXJzZVR5cGU9IlJlc291cmNlIj4KICAgICAgICAgICAgPG13Zy1yczpSZWdpb25MaXN0PgogICAgICAgICAgICAgICA8cmRmOlNlcT4KICAgICAgICAgICAgICAgICAgPHJkZjpsaSByZGY6cGFyc2VUeXBlPSJSZXNvdXJjZSI+CiAgICAgICAgICAgICAgICAgICAgIDxtd2ctcnM6QXJlYSByZGY6cGFyc2VUeXBlPSJSZXNvdXJjZSI+CiAgICAgICAgICAgICAgICAgICAgICAgIDxzdEFyZWE6eT4wLjQ0NTAwMDAwMDAwMDAwMDAxPC9zdEFyZWE6eT4KICAgICAgICAgICAgICAgICAgICAgICAgPHN0QXJlYTp3PjAuMDc4NTcxNDI4NTcxNDI4NTE0PC9zdEFyZWE6dz4KICAgICAgICAgICAgICAgICAgICAgICAgPHN0QXJlYTp4PjAuNzM3Mjg1NzE0Mjg1NzE0MjE8L3N0QXJlYTp4PgogICAgICAgICAgICAgICAgICAgICAgICA8c3RBcmVhOmg+MC4xNTgwMDAwMDAwMDAwMDAwMzwvc3RBcmVhOmg+CiAgICAgICAgICAgICAgICAgICAgICAgIDxzdEFyZWE6dW5pdD5ub3JtYWxpemVkPC9zdEFyZWE6dW5pdD4KICAgICAgICAgICAgICAgICAgICAgPC9td2ctcnM6QXJlYT4KICAgICAgICAgICAgICAgICAgICAgPG13Zy1yczpUeXBlPkZvY3VzPC9td2ctcnM6VHlwZT4KICAgICAgICAgICAgICAgICAgICAgPG13Zy1yczpFeHRlbnNpb25zIHJkZjpwYXJzZVR5cGU9IlJlc291cmNlIi8+CiAgICAgICAgICAgICAgICAgIDwvcmRmOmxpPgogICAgICAgICAgICAgICA8L3JkZjpTZXE+CiAgICAgICAgICAgIDwvbXdnLXJzOlJlZ2lvbkxpc3Q+CiAgICAgICAgICAgIDxtd2ctcnM6QXBwbGllZFRvRGltZW5zaW9ucyByZGY6cGFyc2VUeXBlPSJSZXNvdXJjZSI+CiAgICAgICAgICAgICAgIDxzdERpbTpoPjQyODQ8L3N0RGltOmg+CiAgICAgICAgICAgICAgIDxzdERpbTp3PjU3MTI8L3N0RGltOnc+CiAgICAgICAgICAgICAgIDxzdERpbTp1bml0PnBpeGVsPC9zdERpbTp1bml0PgogICAgICAgICAgICA8L213Zy1yczpBcHBsaWVkVG9EaW1lbnNpb25zPgogICAgICAgICA8L213Zy1yczpSZWdpb25zPgogICAgICA8L3JkZjpEZXNjcmlwdGlvbj4KICAgPC9yZGY6UkRGPgo8L3g6eG1wbWV0YT4K"
+            }
+          }
+        ]
+      },
+      {
+        "mode": "RGB",
+        "size": [
+          2688,
+          2016
+        ],
+        "source_bit_depth": 8,
+        "primary": false,
+        "has_alpha": false,
+        "premultiplied_alpha": false,
+        "thumbnail_sizes": [
+          416
+        ],
+        "depth_image_count": 0,
+        "auxiliary_images": {},
+        "tiling": {
+          "num_columns": 6,
+          "num_rows": 4,
+          "tile_width": 512,
+          "tile_height": 512,
+          "image_width": 2688,
+          "image_height": 2016
+        },
+        "pixel_aspect_ratio": null,
+        "chroma": 1,
+        "colorspace": 0,
+        "color_profile": {
+          "type": "prof",
+          "data": {
+            "encoding": "base64",
+            "length": 536,
+            "sha256": "0ff6958f98684c61f6bbdce1368ddeaf3873baf84545baba482e920d92a914c0",
+            "data": "AAACGGFwcGwEAAAAbW50clJHQiBYWVogB+YAAQABAAAAAAAAYWNzcEFQUEwAAAAAQVBQTAAAAAAAAAAAAAAAAAAAAAAAAPbWAAEAAAAA0y1hcHBsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKZGVzYwAAAPwAAAAwY3BydAAAASwAAABQd3RwdAAAAXwAAAAUclhZWgAAAZAAAAAUZ1hZWgAAAaQAAAAUYlhZWgAAAbgAAAAUclRSQwAAAcwAAAAgY2hhZAAAAewAAAAsYlRSQwAAAcwAAAAgZ1RSQwAAAcwAAAAgbWx1YwAAAAAAAAABAAAADGVuVVMAAAAUAAAAHABEAGkAcwBwAGwAYQB5ACAAUAAzbWx1YwAAAAAAAAABAAAADGVuVVMAAAA0AAAAHABDAG8AcAB5AHIAaQBnAGgAdAAgAEEAcABwAGwAZQAgAEkAbgBjAC4ALAAgADIAMAAyADJYWVogAAAAAAAA9tUAAQAAAADTLFhZWiAAAAAAAACD3wAAPb////+7WFlaIAAAAAAAAEq/AACxNwAACrlYWVogAAAAAAAAKDgAABELAADIuXBhcmEAAAAAAAMAAAACZmYAAPKnAAANWQAAE9AAAApbc2YzMgAAAAAAAQxCAAAF3v//8yYAAAeTAAD9kP//+6L///2jAAAD3AAAwG4="
+          }
+        },
+        "camera_intrinsic_matrix": [
+          1948.3553034067154,
+          1948.3553034067154,
+          1344.0,
+          1008.0,
+          0.0
+        ],
+        "camera_extrinsic_matrix_rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "metadata_blocks": [
+          {
+            "type": "Exif",
+            "content_type": "",
+            "data": {
+              "encoding": "base64",
+              "length": 2652,
+              "sha256": "88e1f2f8ca75617e3c97391cba8c627f0c8f9e5854e71ed14d092dd0e8c27dc9",
+              "data": "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"
+            }
+          }
+        ],
+        "spatial_role": "right"
+      },
+      {
+        "mode": "RGB",
+        "size": [
+          2688,
+          2016
+        ],
+        "source_bit_depth": 8,
+        "primary": false,
+        "has_alpha": false,
+        "premultiplied_alpha": false,
+        "thumbnail_sizes": [
+          416
+        ],
+        "depth_image_count": 0,
+        "auxiliary_images": {},
+        "tiling": {
+          "num_columns": 6,
+          "num_rows": 4,
+          "tile_width": 512,
+          "tile_height": 512,
+          "image_width": 2688,
+          "image_height": 2016
+        },
+        "pixel_aspect_ratio": null,
+        "chroma": 1,
+        "colorspace": 0,
+        "color_profile": {
+          "type": "prof",
+          "data": {
+            "encoding": "base64",
+            "length": 536,
+            "sha256": "0ff6958f98684c61f6bbdce1368ddeaf3873baf84545baba482e920d92a914c0",
+            "data": "AAACGGFwcGwEAAAAbW50clJHQiBYWVogB+YAAQABAAAAAAAAYWNzcEFQUEwAAAAAQVBQTAAAAAAAAAAAAAAAAAAAAAAAAPbWAAEAAAAA0y1hcHBsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKZGVzYwAAAPwAAAAwY3BydAAAASwAAABQd3RwdAAAAXwAAAAUclhZWgAAAZAAAAAUZ1hZWgAAAaQAAAAUYlhZWgAAAbgAAAAUclRSQwAAAcwAAAAgY2hhZAAAAewAAAAsYlRSQwAAAcwAAAAgZ1RSQwAAAcwAAAAgbWx1YwAAAAAAAAABAAAADGVuVVMAAAAUAAAAHABEAGkAcwBwAGwAYQB5ACAAUAAzbWx1YwAAAAAAAAABAAAADGVuVVMAAAA0AAAAHABDAG8AcAB5AHIAaQBnAGgAdAAgAEEAcABwAGwAZQAgAEkAbgBjAC4ALAAgADIAMAAyADJYWVogAAAAAAAA9tUAAQAAAADTLFhZWiAAAAAAAACD3wAAPb////+7WFlaIAAAAAAAAEq/AACxNwAACrlYWVogAAAAAAAAKDgAABELAADIuXBhcmEAAAAAAAMAAAACZmYAAPKnAAANWQAAE9AAAApbc2YzMgAAAAAAAQxCAAAF3v//8yYAAAeTAAD9kP//+6L///2jAAAD3AAAwG4="
+          }
+        },
+        "camera_intrinsic_matrix": [
+          1948.3553034067154,
+          1948.3553034067154,
+          1344.0,
+          1008.0,
+          0.0
+        ],
+        "camera_extrinsic_matrix_rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "metadata_blocks": [
+          {
+            "type": "Exif",
+            "content_type": "",
+            "data": {
+              "encoding": "base64",
+              "length": 2606,
+              "sha256": "f66b71929a1e5dac09219dbdcf42da156a87796fba2e7d0b32a85ceaa10bf823",
+              "data": "AAAABkV4aWYAAE1NACoAAAAIAAoBDwACAAAABgAAAIYBEAACAAAAEgAAAIwBEgADAAAAAQABAAABGgAFAAAAAQAAAJ4BGwAFAAAAAQAAAKYBKAADAAAAAQACAAABMQACAAAABQAAAK4BMgACAAAAFAAAALQBPAACAAAAEgAAAMiHaQAEAAAAAQAAANoAAAAAQXBwbGUAaVBob25lIDE2IFBybyBNYXgAAAAASAAAAAEAAABIAAAAATI3LjIAADIwMjY6MDk6MTggMTg6MzU6MTYAaVBob25lIDE2IFBybyBNYXgAACGCmgAFAAAAAQAAAmyCnQAFAAAAAQAAAnSIIgADAAAAAQACAACIJwADAAAAAQD6AACQAAAHAAAABDAyMzKQAwACAAAAFAAAAnyQBAACAAAAFAAAApCQEAACAAAABwAAAqSQEQACAAAABwAAAqyQEgACAAAABwAAArSSAQAKAAAAAQAAArySAgAFAAAAAQAAAsSSAwAKAAAAAQAAAsySBAAKAAAAAQAAAtSSBwADAAAAAQAFAACSCQADAAAAAQAQAACSCgAFAAAAAQAAAtySFAADAAAABAAAAuSSfAAHAAAG1AAAAuySkQACAAAABDc0NQCSkgACAAAABDc0NQCgAQADAAAAAf//AACgAgAEAAAAAQAACoCgAwAEAAAAAQAAB+CiFwADAAAAAQACAACjAQAHAAAAAQEAAACkAgADAAAAAQAAAACkAwADAAAAAQAAAACkBAAFAAAAAQAACcCkBQADAAAAAQAYAACkMgAFAAAABAAACcikMwACAAAABgAACeikNAACAAAANQAACe4AAAAAAAAAAQAAABgAAAALAAAABTIwMjY6MDk6MTggMTg6MzU6MTYAMjAyNjowOToxOCAxODozNToxNgAtMDQ6MDAAAC0wNDowMAAALTA0OjAwAAAAANpBAAAvmwAAnEYAAESxAADeMwAA3jQAAAAAAAAAAQAXrbgACqqBBTgD7gXCA3RBcHBsZSBpT1MAAAFNTQA4AAEACQAAAAEAAAARAAIABwAAAgAAAAK0AAMABwAAAGgAAAS0AAQACQAAAAEAAAABAAUACQAAAAEAAACyAAYACQAAAAEAAACqAAcACQAAAAEAAAABAAgACgAAAAMAAAUcAA4ACQAAAAEAAAAAABQACQAAAAEAAAAMABcAEAAA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"
+            }
+          }
+        ],
+        "spatial_role": "left"
+      }
+    ],
+    "spatial_photo": {
+      "is_spatial_photo": true,
+      "metadata_source": "macOS ImageIO container properties",
+      "group_index": 0,
+      "left_image_index": 2,
+      "right_image_index": 1,
+      "monoscopic_image_index": 0,
+      "monoscopic_image_location": "Right",
+      "encoded_disparity_adjustment": 240,
+      "disparity_adjustment_fraction_of_width": 0.024,
+      "disparity_adjustment_pixels": 64.512,
+      "disparity_adjustment_semantics": "Presentation-only zero-parallax shift; retained in metadata and not applied to geometric depth.",
+      "stereo_aggressors": [
+        {
+          "Type": "LowImageQuality"
+        }
+      ],
+      "left_camera": {
+        "image_index": 2,
+        "width": 2688,
+        "height": 2016,
+        "orientation": 1,
+        "coordinate_system_id": 0,
+        "position_meters": [
+          -0.019272,
+          0.0,
+          0.0
+        ],
+        "rotation_row_major": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "model_type": "SimplifiedPinhole",
+        "intrinsics_row_major": [
+          1948.3553034067154,
+          0.0,
+          1344.0,
+          0.0,
+          1948.3553034067154,
+          1008.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "focal_length_x_pixels": 1948.3553034067154,
+        "focal_length_y_pixels": 1948.3553034067154,
+        "principal_point_x_pixels": 1344.0,
+        "principal_point_y_pixels": 1008.0
+      },
+      "right_camera": {
+        "image_index": 1,
+        "width": 2688,
+        "height": 2016,
+        "orientation": 1,
+        "coordinate_system_id": 0,
+        "position_meters": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation_row_major": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "model_type": "SimplifiedPinhole",
+        "intrinsics_row_major": [
+          1948.3553034067154,
+          0.0,
+          1344.0,
+          0.0,
+          1948.3553034067154,
+          1008.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "focal_length_x_pixels": 1948.3553034067154,
+        "focal_length_y_pixels": 1948.3553034067154,
+        "principal_point_x_pixels": 1344.0,
+        "principal_point_y_pixels": 1008.0
+      },
+      "baseline_vector_meters": [
+        0.019272,
+        0.0,
+        0.0
+      ],
+      "baseline_meters": 0.019272,
+      "baseline_millimeters": 19.272000000000002,
+      "focal_length_pixels_for_depth": 1948.3553034067154,
+      "principal_point_delta_x_pixels": 0.0,
+      "rectified_stereo_ready": true,
+      "rectified_stereo_validation_notes": [],
+      "raft_stereo_ready": true,
+      "raft_stereo_validation_notes": [],
+      "decoded_orientation_policy": "Stereo inference uses pillow-heif decoded sample coordinates without applying EXIF orientation, so the arrays remain registered to the stored camera intrinsics."
+    }
+  },
+  "decoder": {
+    "pillow_heif": "1.7.0",
+    "libheif": "1.23.3",
+    "numpy": "2.5.3",
+    "settings": {
+      "convert_hdr_to_8bit": false,
+      "hdr_to_16bit": false,
+      "bgr_mode": false,
+      "remove_stride": true,
+      "gamma_correction": false,
+      "tone_mapping": false,
+      "normalization": false
+    }
+  },
+  "precision_scope": "Raw output samples are bit-exact copies of pillow-heif/libheif decoded arrays. Apple native depth assets separately preserve the ImageIO float16/float32 buffers bit-for-bit; native storage precision and encoded source precision are reported independently. Derived physical disparity and metric depth outputs, when present, are explicitly documented float32 calibrations of a raw uint8 uniform-disparity plane. Float32 changes the numeric representation and units, not the source quantization or amount of captured scene information. Classical StereoSGBM and RAFT-Stereo outputs, when requested, are explicitly identified inferred float32 estimates derived from the preserved stereo views. No output can restore information lost when the source HEIF was encoded.",
+  "available_products": [
+    {
+      "asset_index": 0,
+      "width": 768,
+      "height": 576,
+      "channels": 1,
+      "id": "raw:0",
+      "precision": "8-bit integer PNG",
+      "name": "depth \u2014 original samples",
+      "source_precision": "8-bit encoded",
+      "origin": "Embedded image",
+      "description": "Original decoded code values; no gamma, normalization, or resampling."
+    },
+    {
+      "asset_index": 0,
+      "width": 768,
+      "height": 576,
+      "channels": 1,
+      "id": "disparity:0",
+      "name": "depth: Calibrated disparity \u2014 inverse meters",
+      "precision": "32-bit float EXR",
+      "source_precision": "8-bit encoded",
+      "origin": "Calculated",
+      "description": "Calculated from encoded depth codes. Float32 is export storage, not import bit depth. Apple depth accuracy: relative."
+    },
+    {
+      "asset_index": 0,
+      "width": 768,
+      "height": 576,
+      "channels": 1,
+      "id": "meters:0",
+      "name": "depth: Depth distance \u2014 meters",
+      "precision": "32-bit float EXR",
+      "source_precision": "8-bit encoded",
+      "origin": "Calculated",
+      "description": "Calculated from encoded depth codes. Float32 is export storage, not import bit depth. Apple depth accuracy: relative."
+    },
+    {
+      "asset_index": 1,
+      "width": 2856,
+      "height": 2142,
+      "channels": 1,
+      "id": "raw:1",
+      "precision": "8-bit integer PNG",
+      "name": "hdr_gain_map \u2014 original samples",
+      "source_precision": "8-bit encoded",
+      "origin": "Embedded image",
+      "description": "Original decoded code values; no gamma, normalization, or resampling."
+    },
+    {
+      "asset_index": 2,
+      "width": 2688,
+      "height": 2016,
+      "channels": 3,
+      "id": "raw:2",
+      "precision": "8-bit integer PNG",
+      "name": "spatial_left \u2014 original samples",
+      "source_precision": "8-bit encoded",
+      "origin": "Embedded image",
+      "description": "HEIF image 2; full native stereo dimensions. Results use the left view's pixel grid."
+    },
+    {
+      "asset_index": 3,
+      "width": 2688,
+      "height": 2016,
+      "channels": 3,
+      "id": "raw:3",
+      "precision": "8-bit integer PNG",
+      "name": "spatial_right \u2014 original samples",
+      "source_precision": "8-bit encoded",
+      "origin": "Embedded image",
+      "description": "HEIF image 1; full native stereo dimensions. Results use the left view's pixel grid."
+    },
+    {
+      "asset_index": 4,
+      "width": 768,
+      "height": 576,
+      "channels": 1,
+      "id": "raw:4",
+      "precision": "16-bit float EXR",
+      "name": "Apple native disparity \u2014 decoded values",
+      "source_precision": "8-bit encoded",
+      "origin": "Apple decoded",
+      "description": "Apple ImageIO float16; accuracy: relative. A decoded floating-point representation, not additional encoded precision."
+    },
+    {
+      "asset_index": 5,
+      "width": 5712,
+      "height": 4284,
+      "channels": 3,
+      "id": "raw:5",
+      "precision": "8-bit integer PNG",
+      "name": "Display image \u2014 separate camera grid",
+      "source_precision": "8-bit encoded",
+      "origin": "Embedded image",
+      "description": "The full-size monoscopic image has its own framing. Stereo results align to spatial_left, not this display image."
+    },
+    {
+      "id": "raft-height",
+      "name": "RAFT disparity \u2014 raw pixels (inverse depth)",
+      "width": 2688,
+      "height": 2016,
+      "precision": "32-bit float EXR",
+      "source_precision": "Generated estimate",
+      "origin": "Inferred",
+      "description": "Computed from the full-size stereo pair on the left-view grid. Not an embedded image or measured source depth. Model smoothing and occlusion limit reconstruction detail."
+    },
+    {
+      "id": "raft-displacement",
+      "name": "RAFT linear depth \u2014 0\u20131 displacement",
+      "width": 2688,
+      "height": 2016,
+      "precision": "32-bit float EXR",
+      "source_precision": "Generated estimate",
+      "origin": "Inferred",
+      "description": "Computed from the full-size stereo pair on the left-view grid. Not an embedded image or measured source depth. Model smoothing and occlusion limit reconstruction detail."
+    },
+    {
+      "id": "raft-flow",
+      "name": "RAFT signed flow \u2014 pixels",
+      "width": 2688,
+      "height": 2016,
+      "precision": "32-bit float EXR",
+      "source_precision": "Generated estimate",
+      "origin": "Inferred",
+      "description": "Computed from the full-size stereo pair on the left-view grid. Not an embedded image or measured source depth. Model smoothing and occlusion limit reconstruction detail."
+    },
+    {
+      "id": "raft-depth",
+      "name": "RAFT distance \u2014 meters",
+      "width": 2688,
+      "height": 2016,
+      "precision": "32-bit float EXR",
+      "source_precision": "Generated estimate",
+      "origin": "Inferred",
+      "description": "Computed from the full-size stereo pair on the left-view grid. Not an embedded image or measured source depth. Model smoothing and occlusion limit reconstruction detail."
+    },
+    {
+      "id": "stereo-height",
+      "name": "Classical disparity \u2014 raw pixels (inverse depth)",
+      "width": 2688,
+      "height": 2016,
+      "precision": "32-bit float EXR",
+      "source_precision": "Generated estimate",
+      "origin": "Inferred",
+      "description": "Computed from the full-size stereo pair on the left-view grid. Not an embedded image or measured source depth. Model smoothing and occlusion limit reconstruction detail."
+    },
+    {
+      "id": "stereo-displacement",
+      "name": "Classical linear depth \u2014 0\u20131 displacement",
+      "width": 2688,
+      "height": 2016,
+      "precision": "32-bit float EXR",
+      "source_precision": "Generated estimate",
+      "origin": "Inferred",
+      "description": "Computed from the full-size stereo pair on the left-view grid. Not an embedded image or measured source depth. Model smoothing and occlusion limit reconstruction detail."
+    }
+  ],
+  "asset_count": 6,
+  "assets": [
+    {
+      "kind": "depth",
+      "semantic_name": "depth",
+      "parent_image_index": 0,
+      "ordinal": 0,
+      "aux_type": null,
+      "aux_id": null,
+      "mode": "L",
+      "source_bit_depth": 8,
+      "decoded_storage_bit_depth": 8,
+      "dtype": "|u1",
+      "dtype_name": "uint8",
+      "shape": [
+        576,
+        768
+      ],
+      "width": 768,
+      "height": 576,
+      "channels": 1,
+      "minimum": 0,
+      "maximum": 255,
+      "nonfinite_count": 0,
+      "decoded_data_sha256": "516d216dce97986ed849589f124ca249e0a8e7f2abb7c3f12466a1fc34019415",
+      "metadata": {
+        "d_min": 1.166015625,
+        "d_max": 2.177734375,
+        "representation_type": 1,
+        "disparity_reference_view": 0,
+        "nonlinear_representation_model_size": 0,
+        "representation_name": "uniform_disparity",
+        "apple_depth_accuracy": "relative",
+        "apple_native_dtype": "float16"
+      },
+      "premultiplied_alpha": null,
+      "outputs": [
+        {
+          "role": "lossless_exchange",
+          "path": "/opt/ipde/ipde/out/IMG_0835-fixed/IMG_0835_depth.png",
+          "filename": "IMG_0835_depth.png",
+          "size_bytes": 67650,
+          "sha256": "4c19f5f75b822c0d4e7a18d55b262b8ff0aea27fc41f55a9a92dc5bc8d5ce3c6",
+          "verified": true
+        },
+        {
+          "role": "derived_physical_disparity",
+          "path": "/opt/ipde/ipde/out/IMG_0835-fixed/IMG_0835_depth_disparity.exr",
+          "filename": "IMG_0835_depth_disparity.exr",
+          "size_bytes": 223009,
+          "sha256": "07f8ade7ca3adc916e070b0faaf763b75bafd7a1fed18982e461ba133b318ebe",
+          "verified": true,
+          "derivation": {
+            "name": "uniform_disparity_to_physical_disparity",
+            "output_dtype": "float32",
+            "normalization_divisor": 255.0,
+            "d_min": 1.166015625,
+            "d_max": 2.177734375,
+            "units": "1/m",
+            "value_direction": "larger values indicate nearer geometry",
+            "formula": "normalized = float32(raw) / float32(255.0); disparity = normalized * (float32(d_max) - float32(d_min)) + float32(d_min)",
+            "nominal_code_step_inverse_meters": 0.003967524506151676,
+            "shape": [
+              576,
+              768
+            ],
+            "derived_data_sha256": "64aea44755bac683aaf642410a7175db40c46df698a965763174b1c3282bd611",
+            "source_quantization": {
+              "source_dtype": "uint8",
+              "source_bit_depth": 8,
+              "possible_source_code_count": 256,
+              "source_codes_present": 256,
+              "restores_additional_precision": false,
+              "note": "Float32 stores calibrated values, but each output sample still derives from one uint8 code; no missing scene measurements are reconstructed."
+            },
+            "minimum_finite_inverse_meters": 1.166015625,
+            "maximum_finite_inverse_meters": 2.177734375,
+            "nonfinite_count": 0,
+            "distinct_values_present": 256
+          }
+        },
+        {
+          "role": "derived_metric_depth",
+          "path": "/opt/ipde/ipde/out/IMG_0835-fixed/IMG_0835_depth_meters.exr",
+          "filename": "IMG_0835_depth_meters.exr",
+          "size_bytes": 220577,
+          "sha256": "d8f8629f95a3d6912930a78d27b9798a034701f601d076eb14643ce8be2c8d36",
+          "verified": true,
+          "derivation": {
+            "name": "uniform_disparity_to_metric_depth",
+            "output_dtype": "float32",
+            "normalization_divisor": 255.0,
+            "d_min": 1.166015625,
+            "d_max": 2.177734375,
+            "disparity_units": "1/m",
+            "depth_units": "m",
+            "value_direction": "larger values indicate farther geometry; nearer geometry is numerically smaller",
+            "formula": "normalized = float32(raw) / float32(255.0); disparity = normalized * (float32(d_max) - float32(d_min)) + float32(d_min); depth_meters = float32(1.0) / disparity",
+            "shape": [
+              576,
+              768
+            ],
+            "minimum_one_code_step_meters": 0.0008381307125091553,
+            "maximum_one_code_step_meters": 0.0029082894325256348,
+            "derived_data_sha256": "c6be8f4d8c6e5ebed5b6789660fc27c0a677d76d41b2a00fe7163abd274a88fd",
+            "source_quantization": {
+              "source_dtype": "uint8",
+              "source_bit_depth": 8,
+              "possible_source_code_count": 256,
+              "source_codes_present": 256,
+              "restores_additional_precision": false,
+              "note": "Float32 stores calibrated values, but each output sample still derives from one uint8 code; no missing scene measurements are reconstructed."
+            },
+            "minimum_finite_meters": 0.45919281244277954,
+            "maximum_finite_meters": 0.857621431350708,
+            "nonfinite_count": 0,
+            "distinct_values_present": 256
+          }
+        }
+      ]
+    },
+    {
+      "kind": "auxiliary",
+      "semantic_name": "hdr_gain_map",
+      "parent_image_index": 0,
+      "ordinal": 0,
+      "aux_type": "urn:com:apple:photo:2020:aux:hdrgainmap",
+      "aux_id": 63,
+      "mode": "L",
+      "source_bit_depth": 8,
+      "decoded_storage_bit_depth": 8,
+      "dtype": "|u1",
+      "dtype_name": "uint8",
+      "shape": [
+        2142,
+        2856
+      ],
+      "width": 2856,
+      "height": 2142,
+      "channels": 1,
+      "minimum": 42,
+      "maximum": 250,
+      "nonfinite_count": 0,
+      "decoded_data_sha256": "121304f1f47c9f0981f26bc54e3c2adbe797e99a7aa44bb1f1d65f2f58fc7b41",
+      "metadata": {
+        "metadata_blocks": [
+          {
+            "type": "mime",
+            "content_type": "application/rdf+xml",
+            "data": {
+              "encoding": "base64",
+              "length": 445,
+              "sha256": "dcf559945efb0443323dcd95437a10f2aee12ef5045e8742b865e57a64c5eb56",
+              "data": "PHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyIgeDp4bXB0az0iWE1QIENvcmUgNi4wLjAiPgogICA8cmRmOlJERiB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiPgogICAgICA8cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0iIgogICAgICAgICAgICB4bWxuczpIRFJHYWluTWFwPSJodHRwOi8vbnMuYXBwbGUuY29tL0hEUkdhaW5NYXAvMS4wLyI+CiAgICAgICAgIDxIRFJHYWluTWFwOkhEUkdhaW5NYXBWZXJzaW9uPjEzMTA3MjwvSERSR2Fpbk1hcDpIRFJHYWluTWFwVmVyc2lvbj4KICAgICAgICAgPEhEUkdhaW5NYXA6SERSR2Fpbk1hcEhlYWRyb29tPjMuMjI0NzQ3PC9IRFJHYWluTWFwOkhEUkdhaW5NYXBIZWFkcm9vbT4KICAgICAgPC9yZGY6RGVzY3JpcHRpb24+CiAgIDwvcmRmOlJERj4KPC94OnhtcG1ldGE+Cg=="
+            }
+          }
+        ]
+      },
+      "premultiplied_alpha": null,
+      "outputs": [
+        {
+          "role": "lossless_exchange",
+          "path": "/opt/ipde/ipde/out/IMG_0835-fixed/IMG_0835_hdr_gain_map.png",
+          "filename": "IMG_0835_hdr_gain_map.png",
+          "size_bytes": 2006391,
+          "sha256": "056c198e5415f69dd2f06239a75ef6a12a6c1a0e5e8af1bcb147c3c8af4dfba2",
+          "verified": true
+        },
+        {
+          "role": "raw_metadata",
+          "path": "/opt/ipde/ipde/out/IMG_0835-fixed/IMG_0835_hdr_gain_map_metadata0.xmp",
+          "filename": "IMG_0835_hdr_gain_map_metadata0.xmp",
+          "size_bytes": 445,
+          "sha256": "dcf559945efb0443323dcd95437a10f2aee12ef5045e8742b865e57a64c5eb56",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "kind": "spatial_view",
+      "semantic_name": "spatial_left",
+      "parent_image_index": 2,
+      "ordinal": 0,
+      "aux_type": null,
+      "aux_id": null,
+      "mode": "RGB",
+      "source_bit_depth": 8,
+      "decoded_storage_bit_depth": 8,
+      "dtype": "|u1",
+      "dtype_name": "uint8",
+      "shape": [
+        2016,
+        2688,
+        3
+      ],
+      "width": 2688,
+      "height": 2016,
+      "channels": 3,
+      "minimum": 3,
+      "maximum": 255,
+      "nonfinite_count": 0,
+      "decoded_data_sha256": "5b64a0c710028fdc0bf1eed8d4804fc481fc64c811e3eeca70f1ed7ee3e6a142",
+      "metadata": {
+        "spatial_role": "left",
+        "group_index": 0,
+        "camera": {
+          "image_index": 2,
+          "width": 2688,
+          "height": 2016,
+          "orientation": 1,
+          "coordinate_system_id": 0,
+          "position_meters": [
+            -0.019272,
+            0.0,
+            0.0
+          ],
+          "rotation_row_major": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "model_type": "SimplifiedPinhole",
+          "intrinsics_row_major": [
+            1948.3553034067154,
+            0.0,
+            1344.0,
+            0.0,
+            1948.3553034067154,
+            1008.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "focal_length_x_pixels": 1948.3553034067154,
+          "focal_length_y_pixels": 1948.3553034067154,
+          "principal_point_x_pixels": 1344.0,
+          "principal_point_y_pixels": 1008.0
+        },
+        "decoded_orientation_policy": "Stereo inference uses pillow-heif decoded sample coordinates without applying EXIF orientation, so the arrays remain registered to the stored camera intrinsics."
+      },
+      "premultiplied_alpha": null,
+      "outputs": [
+        {
+          "role": "lossless_exchange",
+          "path": "/opt/ipde/ipde/out/IMG_0835-fixed/IMG_0835_spatial_left.png",
+          "filename": "IMG_0835_spatial_left.png",
+          "size_bytes": 6740084,
+          "sha256": "0529e62d0de467a57a460964a20fd42c53828ee4a2a7e624acde8857b476d99f",
+          "verified": true
+        },
+        {
+          "role": "derived_stereo_matching_height_map",
+          "path": "/opt/ipde/ipde/out/IMG_0835-fixed/IMG_0835_spatial_stereo_matching_height.exr",
+          "filename": "IMG_0835_spatial_stereo_matching_height.exr",
+          "size_bytes": 1197601,
+          "sha256": "604d3016f8ab2ea3091174b2aa891e2eb698762f2eb4e4d58db43087982aea76",
+          "verified": true,
+          "derivation": {
+            "engine": "OpenCV StereoSGBM",
+            "algorithm": "classical semi-global block matching",
+            "opencv_version": "4.14.0",
+            "input_shape": [
+              2016,
+              2688,
+              3
+            ],
+            "input_dtype": "uint8",
+            "output_dtype": "float32",
+            "full_decoded_resolution": true,
+            "resized_or_tiled": false,
+            "color_conversion": false,
+            "gamma_correction": false,
+            "normalization": false,
+            "vertical_registration": {
+              "applied": true,
+              "raw_assets_modified": false,
+              "horizontal_coordinates_changed": false,
+              "reference_view": "left",
+              "method": "SIFT ratio matches; deterministic RANSAC vertical affine fit",
+              "reason": "measured vertical misregistration",
+              "feature_match_count": 3697,
+              "inlier_count": 3553,
+              "median_vertical_error_before_pixels": 2.107421875,
+              "median_vertical_error_after_pixels": 0.20607962965061777,
+              "p90_vertical_error_after_pixels": 0.5643883712127639,
+              "right_to_aligned_affine": [
+                [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  -0.00018432556497253246,
+                  0.9979163859536656,
+                  2.1014696018440686
+                ]
+              ],
+              "interpolation": "OpenCV INTER_LINEAR; uint8 inference input only",
+              "invalid_border_pixels": 13991
+            },
+            "photometric_support": {
+              "method": "9x9 normalized patch correlation and two-direction structure tensor",
+              "minimum_correlation": 0.8,
+              "minimum_structure_eigenvalue_code_squared": 1.0,
+              "policy": "unsupported estimates become NaN; accepted disparities are never smoothed or rescaled"
+            },
+            "photometrically_unsupported_pixel_count": 1823168,
+            "out_of_view_pixel_count": 14323,
+            "left_right_consistency": "independent reverse match; both neighbors within 1 pixel",
+            "inconsistent_pixel_count": 946497,
+            "post_consistency_speckle_filter": {
+              "maximum_component_pixels": 200,
+              "neighbor_disparity_difference_pixels": 2,
+              "rejected_pixel_count": 51093,
+              "policy": "reject small disconnected disparity components as NaN; never smooth or fill"
+            },
+            "parameters": {
+              "minDisparity": 0,
+              "numDisparities": 336,
+              "blockSize": 5,
+              "P1": 600,
+              "P2": 2400,
+              "disp12MaxDiff": 1,
+              "preFilterCap": 31,
+              "uniquenessRatio": 5,
+              "speckleWindowSize": 50,
+              "speckleRange": 2,
+              "mode": "STEREO_SGBM_MODE_SGBM_3WAY"
+            },
+            "fixed_point_scale": 16,
+            "fixed_point_precision_pixels": 0.0625,
+            "invalid_fixed_point_value": -16,
+            "invalid_output_representation": "float32 NaN",
+            "valid_pixel_count": 1365441,
+            "invalid_pixel_count": 4053567,
+            "valid_pixel_fraction": 0.25197250124007936,
+            "height_map_formula": "(stereo_sgbm_fixed_disparity / 16) + (cx_right - cx_left); negative/unmatched is NaN",
+            "height_map_units": "pixels",
+            "height_map_value_direction": "larger values generally indicate nearer geometry",
+            "principal_point_delta_x_pixels": 0.0,
+            "apple_disparity_adjustment_applied_to_geometry": false,
+            "apple_disparity_adjustment_reason": "It is a presentation zero-parallax shift, not an optical calibration term.",
+            "precision_scope": "The source RGB arrays remain untouched. The exported float32 values exactly preserve OpenCV's 1/16-pixel fixed-point StereoSGBM estimate; unmatched pixels are NaN. This is an inferred correspondence result, not measured source depth.",
+            "input_color_matching": {
+              "applied": false,
+              "policy": "disabled",
+              "raw_assets_modified": false
+            },
+            "name": "derived_stereo_matching_height_map",
+            "units": "pixels",
+            "value_direction": "larger values generally indicate nearer geometry; NaN means unmatched",
+            "shape": [
+              2016,
+              2688
+            ],
+            "dtype": "float32",
+            "derived_data_sha256": "9c71fb19fb700e34c155458addd7b2f85246cffab52fde81bb1549ba2d573a9f",
+            "minimum_finite": 31.6875,
+            "maximum_finite": 76.5,
+            "nonfinite_count": 4053567
+          }
+        },
+        {
+          "role": "derived_raft_stereo_height_map",
+          "path": "/opt/ipde/ipde/out/IMG_0835-fixed/IMG_0835_spatial_raft_stereo_height.exr",
+          "filename": "IMG_0835_spatial_raft_stereo_height.exr",
+          "size_bytes": 15446985,
+          "sha256": "577c71fdd6d469318a4a6cf99e13e0ae17b3bcae15dff1f2f57b0fc69668067a",
+          "verified": true,
+          "derivation": {
+            "engine": "RAFT-Stereo",
+            "upstream_repository": "https://github.com/princeton-vl/RAFT-Stereo",
+            "raft_source_root": "/opt/ipde/RAFT-Stereo",
+            "raft_source_commit": "6e93ed2169bd858dbb43033988563f3b0bb49506",
+            "checkpoint_path": "/opt/ipde/models/raftstereo-middlebury.pth",
+            "checkpoint_member": null,
+            "checkpoint_name": "raftstereo-middlebury.pth",
+            "checkpoint_sha256": "d22e84c0e431bf31d7cc66902c40601859eb40b35ef7f4399ea81276c2915819",
+            "torch_version": "2.14.0",
+            "device": "mps",
+            "iterations": 32,
+            "correlation_implementation": "alt",
+            "input_shape": [
+              2016,
+              2688,
+              3
+            ],
+            "input_dtype": "uint8",
+            "output_dtype": "float32",
+            "full_decoded_resolution": true,
+            "resized_or_tiled": false,
+            "vertical_registration": {
+              "applied": true,
+              "raw_assets_modified": false,
+              "horizontal_coordinates_changed": false,
+              "reference_view": "left",
+              "method": "SIFT ratio matches; deterministic RANSAC vertical affine fit",
+              "reason": "measured vertical misregistration",
+              "feature_match_count": 3697,
+              "inlier_count": 3553,
+              "median_vertical_error_before_pixels": 2.107421875,
+              "median_vertical_error_after_pixels": 0.20607962965061777,
+              "p90_vertical_error_after_pixels": 0.5643883712127639,
+              "right_to_aligned_affine": [
+                [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  -0.00018432556497253246,
+                  0.9979163859536656,
+                  2.1014696018440686
+                ]
+              ],
+              "interpolation": "OpenCV INTER_LINEAR; uint8 inference input only",
+              "invalid_border_pixels": 13991
+            },
+            "out_of_view_pixel_count": 128359,
+            "left_right_consistency": "independent mirrored reverse inference; both neighbors within 1 pixel",
+            "inconsistent_pixel_count": 420770,
+            "raw_signed_flow_filtered": false,
+            "input_left_sha256": "5b64a0c710028fdc0bf1eed8d4804fc481fc64c811e3eeca70f1ed7ee3e6a142",
+            "input_right_sha256": "aa7435a24c169c8ca67ee2453168f994253adfbbe48ff9ed5a7bbf942506cae1",
+            "model_internal_downsample_factor": 4,
+            "output_upsampling": "RAFT learned convex upsampling; full output size does not imply independent per-pixel measurements",
+            "signed_flow_semantics": "horizontal x_right - x_left correspondence displacement in pixels",
+            "height_map_formula": "(cx_right - cx_left) - signed_flow_pixels; negative/nonfinite is NaN",
+            "height_map_units": "pixels",
+            "height_map_value_direction": "larger values generally indicate nearer geometry",
+            "metric_depth_formula": "float32(focal_length_pixels * baseline_meters) / height_disparity_pixels",
+            "metric_depth_units": "meters",
+            "metric_depth_value_direction": "smaller values indicate nearer geometry",
+            "focal_length_pixels": 1948.3553466796875,
+            "baseline_meters": 0.01927199959754944,
+            "principal_point_delta_x_pixels": 0.0,
+            "finite_metric_depth_count": 4869879,
+            "nonfinite_metric_depth_count": 549129,
+            "apple_disparity_adjustment_applied_to_geometry": false,
+            "apple_disparity_adjustment_reason": "It is a presentation zero-parallax shift, not an optical calibration term.",
+            "precision_scope": "The float32 arrays preserve the model output and documented float32 derivations exactly. RAFT-Stereo is an inferred estimate, not a measured or mathematically exact source depth map.",
+            "input_color_matching": {
+              "applied": false,
+              "policy": "disabled",
+              "raw_assets_modified": false
+            },
+            "name": "derived_raft_stereo_height_map",
+            "units": "pixels",
+            "value_direction": "larger values generally indicate nearer geometry",
+            "shape": [
+              2016,
+              2688
+            ],
+            "dtype": "float32",
+            "derived_data_sha256": "80ad75e31bfacdcd7ab7bcf3ead36e275c31bc693eeeabfd62f69aca57d8f03d",
+            "minimum_finite": 29.90855598449707,
+            "maximum_finite": 75.3319320678711,
+            "nonfinite_count": 549129
+          }
+        },
+        {
+          "role": "derived_raft_stereo_signed_flow",
+          "path": "/opt/ipde/ipde/out/IMG_0835-fixed/IMG_0835_spatial_raft_stereo_signed_flow.exr",
+          "filename": "IMG_0835_spatial_raft_stereo_signed_flow.exr",
+          "size_bytes": 16898330,
+          "sha256": "665430870bc4fe6e439e3815184e8c7b0fa2b576d97113743b2f0fc1e54ccfde",
+          "verified": true,
+          "derivation": {
+            "engine": "RAFT-Stereo",
+            "upstream_repository": "https://github.com/princeton-vl/RAFT-Stereo",
+            "raft_source_root": "/opt/ipde/RAFT-Stereo",
+            "raft_source_commit": "6e93ed2169bd858dbb43033988563f3b0bb49506",
+            "checkpoint_path": "/opt/ipde/models/raftstereo-middlebury.pth",
+            "checkpoint_member": null,
+            "checkpoint_name": "raftstereo-middlebury.pth",
+            "checkpoint_sha256": "d22e84c0e431bf31d7cc66902c40601859eb40b35ef7f4399ea81276c2915819",
+            "torch_version": "2.14.0",
+            "device": "mps",
+            "iterations": 32,
+            "correlation_implementation": "alt",
+            "input_shape": [
+              2016,
+              2688,
+              3
+            ],
+            "input_dtype": "uint8",
+            "output_dtype": "float32",
+            "full_decoded_resolution": true,
+            "resized_or_tiled": false,
+            "vertical_registration": {
+              "applied": true,
+              "raw_assets_modified": false,
+              "horizontal_coordinates_changed": false,
+              "reference_view": "left",
+              "method": "SIFT ratio matches; deterministic RANSAC vertical affine fit",
+              "reason": "measured vertical misregistration",
+              "feature_match_count": 3697,
+              "inlier_count": 3553,
+              "median_vertical_error_before_pixels": 2.107421875,
+              "median_vertical_error_after_pixels": 0.20607962965061777,
+              "p90_vertical_error_after_pixels": 0.5643883712127639,
+              "right_to_aligned_affine": [
+                [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  -0.00018432556497253246,
+                  0.9979163859536656,
+                  2.1014696018440686
+                ]
+              ],
+              "interpolation": "OpenCV INTER_LINEAR; uint8 inference input only",
+              "invalid_border_pixels": 13991
+            },
+            "out_of_view_pixel_count": 128359,
+            "left_right_consistency": "independent mirrored reverse inference; both neighbors within 1 pixel",
+            "inconsistent_pixel_count": 420770,
+            "raw_signed_flow_filtered": false,
+            "input_left_sha256": "5b64a0c710028fdc0bf1eed8d4804fc481fc64c811e3eeca70f1ed7ee3e6a142",
+            "input_right_sha256": "aa7435a24c169c8ca67ee2453168f994253adfbbe48ff9ed5a7bbf942506cae1",
+            "model_internal_downsample_factor": 4,
+            "output_upsampling": "RAFT learned convex upsampling; full output size does not imply independent per-pixel measurements",
+            "signed_flow_semantics": "horizontal x_right - x_left correspondence displacement in pixels",
+            "height_map_formula": "(cx_right - cx_left) - signed_flow_pixels; negative/nonfinite is NaN",
+            "height_map_units": "pixels",
+            "height_map_value_direction": "larger values generally indicate nearer geometry",
+            "metric_depth_formula": "float32(focal_length_pixels * baseline_meters) / height_disparity_pixels",
+            "metric_depth_units": "meters",
+            "metric_depth_value_direction": "smaller values indicate nearer geometry",
+            "focal_length_pixels": 1948.3553466796875,
+            "baseline_meters": 0.01927199959754944,
+            "principal_point_delta_x_pixels": 0.0,
+            "finite_metric_depth_count": 4869879,
+            "nonfinite_metric_depth_count": 549129,
+            "apple_disparity_adjustment_applied_to_geometry": false,
+            "apple_disparity_adjustment_reason": "It is a presentation zero-parallax shift, not an optical calibration term.",
+            "precision_scope": "The float32 arrays preserve the model output and documented float32 derivations exactly. RAFT-Stereo is an inferred estimate, not a measured or mathematically exact source depth map.",
+            "input_color_matching": {
+              "applied": false,
+              "policy": "disabled",
+              "raw_assets_modified": false
+            },
+            "name": "derived_raft_stereo_signed_flow",
+            "units": "pixels",
+            "value_direction": "signed correspondence displacement; sign depends on stored stereo coordinates",
+            "shape": [
+              2016,
+              2688
+            ],
+            "dtype": "float32",
+            "derived_data_sha256": "41fb5ba58b9bf35a8f3b6a2ba35050f610d18bdf15bc14ec0ea8714343c81896",
+            "minimum_finite": -75.6304931640625,
+            "maximum_finite": -29.411418914794922,
+            "nonfinite_count": 0
+          }
+        },
+        {
+          "role": "derived_raft_stereo_metric_depth",
+          "path": "/opt/ipde/ipde/out/IMG_0835-fixed/IMG_0835_spatial_raft_stereo_depth_meters.exr",
+          "filename": "IMG_0835_spatial_raft_stereo_depth_meters.exr",
+          "size_bytes": 15183596,
+          "sha256": "4357ba7d981ef2e13c11adceb7a9eb10e5bdcb6a93a4531fc39d50a3486544fe",
+          "verified": true,
+          "derivation": {
+            "engine": "RAFT-Stereo",
+            "upstream_repository": "https://github.com/princeton-vl/RAFT-Stereo",
+            "raft_source_root": "/opt/ipde/RAFT-Stereo",
+            "raft_source_commit": "6e93ed2169bd858dbb43033988563f3b0bb49506",
+            "checkpoint_path": "/opt/ipde/models/raftstereo-middlebury.pth",
+            "checkpoint_member": null,
+            "checkpoint_name": "raftstereo-middlebury.pth",
+            "checkpoint_sha256": "d22e84c0e431bf31d7cc66902c40601859eb40b35ef7f4399ea81276c2915819",
+            "torch_version": "2.14.0",
+            "device": "mps",
+            "iterations": 32,
+            "correlation_implementation": "alt",
+            "input_shape": [
+              2016,
+              2688,
+              3
+            ],
+            "input_dtype": "uint8",
+            "output_dtype": "float32",
+            "full_decoded_resolution": true,
+            "resized_or_tiled": false,
+            "vertical_registration": {
+              "applied": true,
+              "raw_assets_modified": false,
+              "horizontal_coordinates_changed": false,
+              "reference_view": "left",
+              "method": "SIFT ratio matches; deterministic RANSAC vertical affine fit",
+              "reason": "measured vertical misregistration",
+              "feature_match_count": 3697,
+              "inlier_count": 3553,
+              "median_vertical_error_before_pixels": 2.107421875,
+              "median_vertical_error_after_pixels": 0.20607962965061777,
+              "p90_vertical_error_after_pixels": 0.5643883712127639,
+              "right_to_aligned_affine": [
+                [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  -0.00018432556497253246,
+                  0.9979163859536656,
+                  2.1014696018440686
+                ]
+              ],
+              "interpolation": "OpenCV INTER_LINEAR; uint8 inference input only",
+              "invalid_border_pixels": 13991
+            },
+            "out_of_view_pixel_count": 128359,
+            "left_right_consistency": "independent mirrored reverse inference; both neighbors within 1 pixel",
+            "inconsistent_pixel_count": 420770,
+            "raw_signed_flow_filtered": false,
+            "input_left_sha256": "5b64a0c710028fdc0bf1eed8d4804fc481fc64c811e3eeca70f1ed7ee3e6a142",
+            "input_right_sha256": "aa7435a24c169c8ca67ee2453168f994253adfbbe48ff9ed5a7bbf942506cae1",
+            "model_internal_downsample_factor": 4,
+            "output_upsampling": "RAFT learned convex upsampling; full output size does not imply independent per-pixel measurements",
+            "signed_flow_semantics": "horizontal x_right - x_left correspondence displacement in pixels",
+            "height_map_formula": "(cx_right - cx_left) - signed_flow_pixels; negative/nonfinite is NaN",
+            "height_map_units": "pixels",
+            "height_map_value_direction": "larger values generally indicate nearer geometry",
+            "metric_depth_formula": "float32(focal_length_pixels * baseline_meters) / height_disparity_pixels",
+            "metric_depth_units": "meters",
+            "metric_depth_value_direction": "smaller values indicate nearer geometry",
+            "focal_length_pixels": 1948.3553466796875,
+            "baseline_meters": 0.01927199959754944,
+            "principal_point_delta_x_pixels": 0.0,
+            "finite_metric_depth_count": 4869879,
+            "nonfinite_metric_depth_count": 549129,
+            "apple_disparity_adjustment_applied_to_geometry": false,
+            "apple_disparity_adjustment_reason": "It is a presentation zero-parallax shift, not an optical calibration term.",
+            "precision_scope": "The float32 arrays preserve the model output and documented float32 derivations exactly. RAFT-Stereo is an inferred estimate, not a measured or mathematically exact source depth map.",
+            "input_color_matching": {
+              "applied": false,
+              "policy": "disabled",
+              "raw_assets_modified": false
+            },
+            "name": "derived_raft_stereo_metric_depth",
+            "units": "meters",
+            "value_direction": "smaller values indicate nearer geometry",
+            "shape": [
+              2016,
+              2688
+            ],
+            "dtype": "float32",
+            "derived_data_sha256": "17cbcf0ab4c37175034c250416b0101a75c7993d439f2e532158e12a84824922",
+            "minimum_finite": 0.4984433650970459,
+            "maximum_finite": 1.2554501295089722,
+            "nonfinite_count": 549129
+          }
+        },
+        {
+          "role": "derived_stereo_matching_displacement_0_to_1",
+          "path": "/opt/ipde/ipde/out/IMG_0835-fixed/IMG_0835_spatial_stereo_matching_displacement_0_to_1.exr",
+          "filename": "IMG_0835_spatial_stereo_matching_displacement_0_to_1.exr",
+          "size_bytes": 2097998,
+          "sha256": "9a85241dd81d3a31f8b5884761ed9a9f5b837fc17652103141cc513b5ce9da85",
+          "verified": true,
+          "derivation": {
+            "engine": "OpenCV StereoSGBM",
+            "algorithm": "classical semi-global block matching",
+            "opencv_version": "4.14.0",
+            "input_shape": [
+              2016,
+              2688,
+              3
+            ],
+            "input_dtype": "uint8",
+            "output_dtype": "float32",
+            "full_decoded_resolution": true,
+            "resized_or_tiled": false,
+            "color_conversion": false,
+            "gamma_correction": false,
+            "normalization": true,
+            "vertical_registration": {
+              "applied": true,
+              "raw_assets_modified": false,
+              "horizontal_coordinates_changed": false,
+              "reference_view": "left",
+              "method": "SIFT ratio matches; deterministic RANSAC vertical affine fit",
+              "reason": "measured vertical misregistration",
+              "feature_match_count": 3697,
+              "inlier_count": 3553,
+              "median_vertical_error_before_pixels": 2.107421875,
+              "median_vertical_error_after_pixels": 0.20607962965061777,
+              "p90_vertical_error_after_pixels": 0.5643883712127639,
+              "right_to_aligned_affine": [
+                [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  -0.00018432556497253246,
+                  0.9979163859536656,
+                  2.1014696018440686
+                ]
+              ],
+              "interpolation": "OpenCV INTER_LINEAR; uint8 inference input only",
+              "invalid_border_pixels": 13991
+            },
+            "photometric_support": {
+              "method": "9x9 normalized patch correlation and two-direction structure tensor",
+              "minimum_correlation": 0.8,
+              "minimum_structure_eigenvalue_code_squared": 1.0,
+              "policy": "unsupported estimates become NaN; accepted disparities are never smoothed or rescaled"
+            },
+            "photometrically_unsupported_pixel_count": 1823168,
+            "out_of_view_pixel_count": 14323,
+            "left_right_consistency": "independent reverse match; both neighbors within 1 pixel",
+            "inconsistent_pixel_count": 946497,
+            "post_consistency_speckle_filter": {
+              "maximum_component_pixels": 200,
+              "neighbor_disparity_difference_pixels": 2,
+              "rejected_pixel_count": 51093,
+              "policy": "reject small disconnected disparity components as NaN; never smooth or fill"
+            },
+            "parameters": {
+              "minDisparity": 0,
+              "numDisparities": 336,
+              "blockSize": 5,
+              "P1": 600,
+              "P2": 2400,
+              "disp12MaxDiff": 1,
+              "preFilterCap": 31,
+              "uniquenessRatio": 5,
+              "speckleWindowSize": 50,
+              "speckleRange": 2,
+              "mode": "STEREO_SGBM_MODE_SGBM_3WAY"
+            },
+            "fixed_point_scale": 16,
+            "fixed_point_precision_pixels": 0.0625,
+            "invalid_fixed_point_value": -16,
+            "invalid_output_representation": "float32 NaN",
+            "valid_pixel_count": 1365441,
+            "invalid_pixel_count": 4053567,
+            "valid_pixel_fraction": 0.25197250124007936,
+            "height_map_formula": "(stereo_sgbm_fixed_disparity / 16) + (cx_right - cx_left); negative/unmatched is NaN",
+            "height_map_units": "pixels",
+            "height_map_value_direction": "larger values generally indicate nearer geometry",
+            "principal_point_delta_x_pixels": 0.0,
+            "apple_disparity_adjustment_applied_to_geometry": false,
+            "apple_disparity_adjustment_reason": "It is a presentation zero-parallax shift, not an optical calibration term.",
+            "precision_scope": "The source RGB arrays remain untouched. The exported float32 values exactly preserve OpenCV's 1/16-pixel fixed-point StereoSGBM estimate; unmatched pixels are NaN. This is an inferred correspondence result, not measured source depth.",
+            "input_color_matching": {
+              "applied": false,
+              "policy": "disabled",
+              "raw_assets_modified": false
+            },
+            "displacement_mapping": {
+              "policy": "explicit linear camera-axis depth mapping",
+              "source_units": "pixels",
+              "intermediate_units": "meters",
+              "output_units": "normalized 0..1",
+              "formula": "Z = float32(focal_px * baseline_m) / disparity; (far_m - Z) / (far_m - near_m)",
+              "near_depth_meters_float32": 0.49083271622657776,
+              "far_depth_meters_float32": 1.1849689483642578,
+              "displacement_scale_meters_float32": 0.6941362619400024,
+              "constant_map": false,
+              "finite_input_count": 1365441,
+              "nonfinite_policy": "nonpositive disparity and nonfinite depth remain NaN; no hole filling",
+              "scientific_pixel_disparity_replaced": false,
+              "precision_scope": "Explicit float32 derivative; linear in Z, preserves finite range without percentile clipping"
+            },
+            "name": "derived_stereo_matching_displacement_0_to_1",
+            "units": "normalized 0..1",
+            "value_direction": "larger values indicate nearer geometry; NaN remains unmatched",
+            "shape": [
+              2016,
+              2688
+            ],
+            "dtype": "float32",
+            "derived_data_sha256": "6484b7fdc13dc817d73c2b77349ca3f9cc1563db3d091ef0ffeb55e4b45ee19a",
+            "minimum_finite": 0.0,
+            "maximum_finite": 1.0,
+            "nonfinite_count": 4053567
+          }
+        },
+        {
+          "role": "derived_raft_stereo_displacement_0_to_1",
+          "path": "/opt/ipde/ipde/out/IMG_0835-fixed/IMG_0835_spatial_raft_stereo_displacement_0_to_1.exr",
+          "filename": "IMG_0835_spatial_raft_stereo_displacement_0_to_1.exr",
+          "size_bytes": 15626603,
+          "sha256": "d9ee016cff2034c0f0f00b7b21c75a9c73cb14833ef265c45687e83dacac3705",
+          "verified": true,
+          "derivation": {
+            "engine": "RAFT-Stereo",
+            "upstream_repository": "https://github.com/princeton-vl/RAFT-Stereo",
+            "raft_source_root": "/opt/ipde/RAFT-Stereo",
+            "raft_source_commit": "6e93ed2169bd858dbb43033988563f3b0bb49506",
+            "checkpoint_path": "/opt/ipde/models/raftstereo-middlebury.pth",
+            "checkpoint_member": null,
+            "checkpoint_name": "raftstereo-middlebury.pth",
+            "checkpoint_sha256": "d22e84c0e431bf31d7cc66902c40601859eb40b35ef7f4399ea81276c2915819",
+            "torch_version": "2.14.0",
+            "device": "mps",
+            "iterations": 32,
+            "correlation_implementation": "alt",
+            "input_shape": [
+              2016,
+              2688,
+              3
+            ],
+            "input_dtype": "uint8",
+            "output_dtype": "float32",
+            "full_decoded_resolution": true,
+            "resized_or_tiled": false,
+            "vertical_registration": {
+              "applied": true,
+              "raw_assets_modified": false,
+              "horizontal_coordinates_changed": false,
+              "reference_view": "left",
+              "method": "SIFT ratio matches; deterministic RANSAC vertical affine fit",
+              "reason": "measured vertical misregistration",
+              "feature_match_count": 3697,
+              "inlier_count": 3553,
+              "median_vertical_error_before_pixels": 2.107421875,
+              "median_vertical_error_after_pixels": 0.20607962965061777,
+              "p90_vertical_error_after_pixels": 0.5643883712127639,
+              "right_to_aligned_affine": [
+                [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  -0.00018432556497253246,
+                  0.9979163859536656,
+                  2.1014696018440686
+                ]
+              ],
+              "interpolation": "OpenCV INTER_LINEAR; uint8 inference input only",
+              "invalid_border_pixels": 13991
+            },
+            "out_of_view_pixel_count": 128359,
+            "left_right_consistency": "independent mirrored reverse inference; both neighbors within 1 pixel",
+            "inconsistent_pixel_count": 420770,
+            "raw_signed_flow_filtered": false,
+            "input_left_sha256": "5b64a0c710028fdc0bf1eed8d4804fc481fc64c811e3eeca70f1ed7ee3e6a142",
+            "input_right_sha256": "aa7435a24c169c8ca67ee2453168f994253adfbbe48ff9ed5a7bbf942506cae1",
+            "model_internal_downsample_factor": 4,
+            "output_upsampling": "RAFT learned convex upsampling; full output size does not imply independent per-pixel measurements",
+            "signed_flow_semantics": "horizontal x_right - x_left correspondence displacement in pixels",
+            "height_map_formula": "(cx_right - cx_left) - signed_flow_pixels; negative/nonfinite is NaN",
+            "height_map_units": "pixels",
+            "height_map_value_direction": "larger values generally indicate nearer geometry",
+            "metric_depth_formula": "float32(focal_length_pixels * baseline_meters) / height_disparity_pixels",
+            "metric_depth_units": "meters",
+            "metric_depth_value_direction": "smaller values indicate nearer geometry",
+            "focal_length_pixels": 1948.3553466796875,
+            "baseline_meters": 0.01927199959754944,
+            "principal_point_delta_x_pixels": 0.0,
+            "finite_metric_depth_count": 4869879,
+            "nonfinite_metric_depth_count": 549129,
+            "apple_disparity_adjustment_applied_to_geometry": false,
+            "apple_disparity_adjustment_reason": "It is a presentation zero-parallax shift, not an optical calibration term.",
+            "precision_scope": "The float32 arrays preserve the model output and documented float32 derivations exactly. RAFT-Stereo is an inferred estimate, not a measured or mathematically exact source depth map.",
+            "input_color_matching": {
+              "applied": false,
+              "policy": "disabled",
+              "raw_assets_modified": false
+            },
+            "normalization": true,
+            "displacement_mapping": {
+              "policy": "explicit linear camera-axis depth mapping",
+              "source_units": "pixels",
+              "intermediate_units": "meters",
+              "output_units": "normalized 0..1",
+              "formula": "Z = float32(focal_px * baseline_m) / disparity; (far_m - Z) / (far_m - near_m)",
+              "near_depth_meters_float32": 0.4984433650970459,
+              "far_depth_meters_float32": 1.2554501295089722,
+              "displacement_scale_meters_float32": 0.7570067644119263,
+              "constant_map": false,
+              "finite_input_count": 4869879,
+              "nonfinite_policy": "nonpositive disparity and nonfinite depth remain NaN; no hole filling",
+              "scientific_pixel_disparity_replaced": false,
+              "precision_scope": "Explicit float32 derivative; linear in Z, preserves finite range without percentile clipping"
+            },
+            "name": "derived_raft_stereo_displacement_0_to_1",
+            "units": "normalized 0..1",
+            "value_direction": "larger values indicate nearer geometry; NaN remains unmatched",
+            "shape": [
+              2016,
+              2688
+            ],
+            "dtype": "float32",
+            "derived_data_sha256": "3a3051cd003f77ba70a8cd4cdaac59774cc38a634c6dd9b8c9595b0504ecaa63",
+            "minimum_finite": 0.0,
+            "maximum_finite": 1.0,
+            "nonfinite_count": 549129
+          }
+        }
+      ]
+    },
+    {
+      "kind": "spatial_view",
+      "semantic_name": "spatial_right",
+      "parent_image_index": 1,
+      "ordinal": 0,
+      "aux_type": null,
+      "aux_id": null,
+      "mode": "RGB",
+      "source_bit_depth": 8,
+      "decoded_storage_bit_depth": 8,
+      "dtype": "|u1",
+      "dtype_name": "uint8",
+      "shape": [
+        2016,
+        2688,
+        3
+      ],
+      "width": 2688,
+      "height": 2016,
+      "channels": 3,
+      "minimum": 0,
+      "maximum": 255,
+      "nonfinite_count": 0,
+      "decoded_data_sha256": "f2f1fbeda99c33ef6c0212c13d204f4b04eba7945896cb820664cdc99e66f757",
+      "metadata": {
+        "spatial_role": "right",
+        "group_index": 0,
+        "camera": {
+          "image_index": 1,
+          "width": 2688,
+          "height": 2016,
+          "orientation": 1,
+          "coordinate_system_id": 0,
+          "position_meters": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation_row_major": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "model_type": "SimplifiedPinhole",
+          "intrinsics_row_major": [
+            1948.3553034067154,
+            0.0,
+            1344.0,
+            0.0,
+            1948.3553034067154,
+            1008.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "focal_length_x_pixels": 1948.3553034067154,
+          "focal_length_y_pixels": 1948.3553034067154,
+          "principal_point_x_pixels": 1344.0,
+          "principal_point_y_pixels": 1008.0
+        },
+        "decoded_orientation_policy": "Stereo inference uses pillow-heif decoded sample coordinates without applying EXIF orientation, so the arrays remain registered to the stored camera intrinsics."
+      },
+      "premultiplied_alpha": null,
+      "outputs": [
+        {
+          "role": "lossless_exchange",
+          "path": "/opt/ipde/ipde/out/IMG_0835-fixed/IMG_0835_spatial_right.png",
+          "filename": "IMG_0835_spatial_right.png",
+          "size_bytes": 6314175,
+          "sha256": "c9a1f74c14b82000419c313e54171356ab25761b76da2e09ec00bfb328945a71",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "kind": "native_depth",
+      "semantic_name": "apple_disparity",
+      "parent_image_index": 0,
+      "ordinal": 0,
+      "aux_type": null,
+      "aux_id": null,
+      "mode": "float16",
+      "source_bit_depth": 8,
+      "decoded_storage_bit_depth": 16,
+      "dtype": "<f2",
+      "dtype_name": "float16",
+      "shape": [
+        576,
+        768
+      ],
+      "width": 768,
+      "height": 576,
+      "channels": 1,
+      "minimum": 1.166015625,
+      "maximum": 2.177734375,
+      "nonfinite_count": 0,
+      "decoded_data_sha256": "d986f8b132f7cbd2d6e66bfb95864c0c6c920b16bec76f77fc3931951200c504",
+      "metadata": {
+        "decoder": "macOS ImageIO native depth buffer",
+        "representation": "disparity",
+        "accuracy": "relative",
+        "description": {
+          "BytesPerRow": 1536,
+          "Height": 576,
+          "PixelFormat": 1751411059,
+          "Orientation": 1,
+          "Width": 768
+        },
+        "encoded_source_bit_depth": 8,
+        "native_storage_bit_depth": 16,
+        "precision_note": "Apple's decoded floating-point representation; not additional captured precision"
+      },
+      "premultiplied_alpha": null,
+      "outputs": [
+        {
+          "role": "lossless_exchange",
+          "path": "/opt/ipde/ipde/out/IMG_0835-fixed/IMG_0835_apple_disparity.exr",
+          "filename": "IMG_0835_apple_disparity.exr",
+          "size_bytes": 80421,
+          "sha256": "9b074ac7cca10af65034a66a930771d0a224d29f8afd57c88fa4288b3e1b044c",
+          "verified": true
+        },
+        {
+          "role": "raw_metadata",
+          "path": "/opt/ipde/ipde/out/IMG_0835-fixed/IMG_0835_apple_disparity_metadata0.xmp",
+          "filename": "IMG_0835_apple_disparity_metadata0.xmp",
+          "size_bytes": 5399,
+          "sha256": "e14b5a3ed8f7b7aebf6308f6f80bdca37335f8465f80a7f853571b5dbb181ff5",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "kind": "display_view",
+      "semantic_name": "display",
+      "parent_image_index": 0,
+      "ordinal": 0,
+      "aux_type": null,
+      "aux_id": null,
+      "mode": "RGB",
+      "source_bit_depth": 8,
+      "decoded_storage_bit_depth": 8,
+      "dtype": "|u1",
+      "dtype_name": "uint8",
+      "shape": [
+        4284,
+        5712,
+        3
+      ],
+      "width": 5712,
+      "height": 4284,
+      "channels": 3,
+      "minimum": 0,
+      "maximum": 255,
+      "nonfinite_count": 0,
+      "decoded_data_sha256": "db992e789e77097fd8a15c361a500f2d7505790f3f94f8dc37a1e6393f52eddc",
+      "metadata": {
+        "spatial_role": "monoscopic_display",
+        "coordinate_system": "separate display image; not the stereo or depth reference grid",
+        "stereo_input": false
+      },
+      "premultiplied_alpha": null,
+      "outputs": [
+        {
+          "role": "lossless_exchange",
+          "path": "/opt/ipde/ipde/out/IMG_0835-fixed/IMG_0835_display.png",
+          "filename": "IMG_0835_display.png",
+          "size_bytes": 31827642,
+          "sha256": "86116e667a5d87ef1c6255d9512fa08e17852721cd6defdcb02bcd12ff028947",
+          "verified": true
+        }
+      ]
+    }
+  ],
+  "warnings": [
+    "Apple labels this embedded depth as relative accuracy; its calibrated values are not guaranteed absolute scene distances.",
+    "Apple spatial-photo stereo aggressor: LowImageQuality",
+    "stereo_matching: corrected vertical alignment for inference; median feature error 2.11 to 0.21 pixels. Raw views are unchanged.",
+    "stereo_matching: 4053567/5419008 pixels have no finite estimate; these remain NaN (often displayed black), not invented geometry.",
+    "raft_stereo: corrected vertical alignment for inference; median feature error 2.11 to 0.21 pixels. Raw views are unchanged.",
+    "raft_stereo: 549129/5419008 pixels have no finite estimate; these remain NaN (often displayed black), not invented geometry."
+  ],
+  "selected_products": null,
+  "manifest_path": "/opt/ipde/ipde/out/IMG_0835-fixed/IMG_0835_aux_manifest.json"
+}
