@@ -144,6 +144,16 @@ class SelectionTests(unittest.TestCase):
         self.assertFalse(config.write_npy)
         self.assertEqual(config.raft_model, Path("/tmp/chosen.pth"))
 
+    def test_classical_noise_scale_reaches_matcher_through_cli_and_export(self):
+        with patch("ipde.cli.extract_file", return_value={}) as extract, patch("builtins.print"):
+            self.assertEqual(main([str(self.source), "--json", "--select", "stereo-height",
+                                   "--stereo-noise-sigma", "0"]), 0)
+        self.assertEqual(extract.call_args.args[1].stereo_noise_sigma_pixels, 0)
+        with patch("ipde.extractor.run_stereo_matching",
+                   return_value=StereoMatchingResult(self.height, {})) as matcher:
+            self.export("stereo-height", stereo_noise_sigma_pixels=.75)
+        self.assertEqual(matcher.call_args.args[3].noise_sigma_pixels, .75)
+
     def test_inventory_exposes_raw_and_generated_choices(self):
         products = {p["id"] for p in inspect_file(self.source)["available_products"]}
         self.assertTrue({"raw:0", "raw:1", "raft-height", "raft-displacement", "stereo-height"} <= products)

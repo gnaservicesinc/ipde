@@ -173,6 +173,19 @@ public:
         spatialOptions->addStretch();
         root->addLayout(spatialOptions);
 
+        auto *classicalOptions = new QHBoxLayout;
+        classicalOptions->addWidget(new QLabel(QStringLiteral("Classical matching:"), central));
+        stereoSharedDetail_ = new QCheckBox(QStringLiteral("Tolerate camera detail differences"), central);
+        stereoSharedDetail_->setChecked(true);
+        stereoSharedDetail_->setToolTip(QStringLiteral(
+            "Compare mildly smoothed inference copies and validate at native and shared detail scales. "
+            "This accommodates different camera noise and sharpening. Raw images stay unchanged; "
+            "the left view remains the reference, and no image texture is copied into depth. "
+            "Disable to match original code values without this preprocessing."));
+        classicalOptions->addWidget(stereoSharedDetail_);
+        classicalOptions->addStretch();
+        root->addLayout(classicalOptions);
+
         auto addPathRow = [this, root, central](const QString &label, const QString &key,
                                                 bool directory) {
             auto *row = new QHBoxLayout;
@@ -448,6 +461,8 @@ private:
             for (const auto &id : selectedProducts_.value(current_))
                 arguments << QStringLiteral("--select") << id;
             arguments << QStringLiteral("--raft-device") << raftDevice_->currentData().toString();
+            arguments << QStringLiteral("--stereo-noise-sigma")
+                      << (stereoSharedDetail_->isChecked() ? QStringLiteral("1") : QStringLiteral("0"));
             if (colorMatching_->isChecked()) {
                 arguments << QStringLiteral("--color-matching") << QStringLiteral("--color-hero")
                           << colorHero_->currentData().toString();
@@ -577,6 +592,7 @@ private:
         exactNpy_->setEnabled(!running_);
         manifest_->setEnabled(!running_);
         colorMatching_->setEnabled(!running_);
+        stereoSharedDetail_->setEnabled(!running_);
         colorHero_->setEnabled(!running_ && colorMatching_->isChecked());
         raftDevice_->setEnabled(!running_);
         raftModel_->setEnabled(!running_);
@@ -600,6 +616,7 @@ private:
     QCheckBox *exactNpy_ = nullptr;
     QCheckBox *manifest_ = nullptr;
     QCheckBox *colorMatching_ = nullptr;
+    QCheckBox *stereoSharedDetail_ = nullptr;
     QComboBox *colorHero_ = nullptr;
     QComboBox *raftDevice_ = nullptr;
     QCheckBox *overwrite_ = nullptr;

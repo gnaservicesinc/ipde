@@ -108,13 +108,17 @@ option `--stereo-comparison` exports both full-resolution near-is-high float32
 pixel-disparity maps:
 
 - `<name>_spatial_stereo_matching_height.exr` uses OpenCV StereoSGBM, a classical
-  semi-global block matcher. It consumes the decoded RGB codes directly without
-  grayscale conversion, resizing, normalization, gamma correction, or hole
-  filling. OpenCV's 1/16-pixel fixed-point disparities are preserved in float32;
+  semi-global block matcher. It uses RGB inference copies with a mild Gaussian
+  filter (sigma 1 pixel, 7×7 kernel) to accommodate differences in camera detail,
+  noise, and sharpening. Raw extracted views are untouched. Disable this with
+  **Tolerate camera detail differences** in the GUI or `--stereo-noise-sigma 0`.
+  No resizing, normalization, gamma correction, or hole filling is applied.
+  OpenCV's 1/16-pixel fixed-point disparities are preserved in float32;
   pixels rejected by the matcher are explicit `NaN` values. An independent reverse
   match must agree within one pixel at both bracketing coordinates. Small disparity
   components (200 pixels or fewer, with a two-pixel neighbor tolerance) are rejected
-  after consistency and photometric checking. A 9×9 patch must have correlation
+  after consistency and photometric checking. At either the native or shared
+  detail scale, a 9×9 grayscale patch must have correlation
   at least 0.8 and mean squared **horizontal** gradient at least 1 in both
   views (Sobel derivative scaled by 1/8, in code values per pixel). Rectified
   stereo searches in one dimension; vertical edges constrain that search and
@@ -122,6 +126,10 @@ pixel-disparity maps:
   horizontal edges can otherwise agree on a false near-zero
   disparity in both directions, producing enormous false distances. These checks
   reject unsupported values as NaN; accepted samples are never smoothed or filled.
+  Equal computational margins on both inputs avoid OpenCV's automatic exclusion
+  of a full search-width strip at the image edges. The margins are removed from
+  the output, and only correspondences inside the original images can pass
+  validation. Genuine occlusions and unavailable overlap remain unsupported.
 - `<name>_spatial_raft_stereo_height.exr` uses the official
   [Princeton RAFT-Stereo](https://github.com/princeton-vl/RAFT-Stereo) model. It is
   checked against an independent mirrored reverse inference. The forward and
@@ -354,6 +362,7 @@ Useful options:
 --displacement-maps  Also export per-map float32 0..1 displacement linear in depth
 --stereo-matching  Export only the classical full-resolution height map
 --stereo-max-disparity PIXELS  Override the classical disparity search range
+--stereo-noise-sigma PIXELS  Shared-detail scale, default 1; 0 disables, maximum 3
 --color-matching  Match the non-Hero view's RGB histograms before inference
 --color-hero {left,right}  Select the unchanged Hero view (default: left)
 --raft-stereo   Export only the full-resolution RAFT-Stereo height map

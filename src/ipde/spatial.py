@@ -41,6 +41,7 @@ class DisplacementMappingError(RuntimeError):
 class StereoMatchingOptions:
     maximum_disparity: int | None = None
     block_size: int = 5
+    noise_sigma_pixels: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -808,6 +809,7 @@ def correspondence_validity(signed_flow: np.ndarray, right_valid: np.ndarray) ->
 
 def stereo_photometric_support(
     left: np.ndarray, right: np.ndarray, disparity: np.ndarray,
+    noise_sigma_pixels: float = 1.0,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Reject unsupported classical matches without changing accepted disparities.
 
@@ -822,34 +824,83 @@ def stereo_photometric_support(
     right_gray = cv2.cvtColor(right, cv2.COLOR_RGB2GRAY).astype(np.float32)
     yy, xx = np.indices(disparity.shape, dtype=np.float32)
     xr = xx - np.where(np.isfinite(disparity), disparity, 0)
-    warped = cv2.remap(right_gray, xr, yy, cv2.INTER_LINEAR)
-    # Float64 moments avoid catastrophic cancellation on nearly flat uint8 data.
-    a, b = left_gray.astype(np.float64), warped.astype(np.float64)
     def mean(value: np.ndarray) -> np.ndarray:
         return cv2.boxFilter(value, -1, (9, 9), normalize=True)
-    ma, mb = mean(a), mean(b)
-    va = np.maximum(0, mean(a * a) - ma * ma)
-    vb = np.maximum(0, mean(b * b) - mb * mb)
-    covariance = mean(a * b) - ma * mb
-    correlation = covariance / np.sqrt(np.maximum(va * vb, 1e-12))
     def horizontal_information(gray: np.ndarray) -> np.ndarray:
         # Sobel / 8 gives the central horizontal derivative in code values/pixel.
         dx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3, scale=1.0 / 8.0)
         return mean(dx * dx)
-    left_texture = horizontal_information(left_gray)
-    right_texture = cv2.remap(horizontal_information(right_gray), xr, yy, cv2.INTER_LINEAR)
-    supported = ((correlation >= .8) & (left_texture >= 1.0) & (right_texture >= 1.0)
-                 & np.isfinite(disparity) & (xr >= 4) & (xr <= disparity.shape[1] - 5))
-    supported[:4] = False
-    supported[-4:] = False
-    supported[:, :4] = False
-    supported[:, -4:] = False
+
+    def at_scale(sigma: float) -> np.ndarray:
+        a, b = left_gray, right_gray
+        radius = int(math.ceil(3 * sigma))
+        if radius:
+            kernel = (2 * radius + 1, 2 * radius + 1)
+            a = cv2.GaussianBlur(a, kernel, sigma, borderType=cv2.BORDER_REFLECT_101)
+            b = cv2.GaussianBlur(b, kernel, sigma, borderType=cv2.BORDER_REFLECT_101)
+        # Float64 moments avoid cancellation on nearly flat uint8 code values.
+        aw = a.astype(np.float64)
+        bw = cv2.remap(b, xr, yy, cv2.INTER_LINEAR).astype(np.float64)
+        ma, mb = mean(aw), mean(bw)
+        va = np.maximum(0, mean(aw * aw) - ma * ma)
+        vb = np.maximum(0, mean(bw * bw) - mb * mb)
+        correlation = (mean(aw * bw) - ma * mb) / np.sqrt(np.maximum(va * vb, 1e-12))
+        left_texture = horizontal_information(a)
+        # Measure texture in the source, not in the disparity-warped image:
+        # flow discontinuities must not manufacture texture evidence.
+        right_texture = cv2.remap(horizontal_information(b), xr, yy, cv2.INTER_LINEAR)
+        margin = 4 + radius
+        valid = ((correlation >= .8) & (left_texture >= 1.0) & (right_texture >= 1.0)
+                 & np.isfinite(disparity) & (xr >= margin) & (xr <= disparity.shape[1] - 1 - margin))
+        valid[:margin] = False
+        valid[-margin:] = False
+        valid[:, :margin] = False
+        valid[:, -margin:] = False
+        return valid
+
+    native = at_scale(0.0)
+    shared = at_scale(noise_sigma_pixels) if noise_sigma_pixels > 0 else native
+    supported = native | shared
     return supported, {
-        "method": "9x9 normalized patch correlation and horizontal gradient energy",
+        "method": "native/shared-detail 9x9 normalized patch correlation and horizontal gradient energy",
         "minimum_correlation": .8, "minimum_mean_squared_horizontal_gradient": 1.0,
         "gradient_units": "code values per pixel; Sobel scale 1/8",
+        "shared_detail_sigma_pixels": noise_sigma_pixels,
+        "native_scale_supported_count": int(np.count_nonzero(native)),
+        "additional_shared_scale_supported_count": int(np.count_nonzero(shared & ~native)),
+        "scale_policy": "either scale may support a match; both require observable horizontal structure in both views",
         "policy": "unsupported estimates become NaN; accepted disparities are never smoothed or rescaled",
     }
+
+
+def _sgbm_correspondences(
+    left: np.ndarray, right: np.ndarray, parameters: Mapping[str, Any],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute both directions without OpenCV's maximum-search-width crop.
+
+    SGBM does not search the first maxDisparity columns even where the actual
+    disparity is much smaller. Add the same computational margin to both inputs
+    so original pixels are searched, then remove it from the output. This does
+    not shift relative coordinates or change disparity units. Padding is NEVER
+    accepted as image evidence: callers check bounds, photometry and reverse
+    agreement in the original unpadded arrays.
+    """
+    import cv2
+
+    pad = int(parameters["numDisparities"])
+    matcher = cv2.StereoSGBM.create(**parameters)
+
+    def compute(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        ap = cv2.copyMakeBorder(a, 0, 0, pad, 0, cv2.BORDER_REPLICATE)
+        bp = cv2.copyMakeBorder(b, 0, 0, pad, 0, cv2.BORDER_REPLICATE)
+        fixed = np.asarray(matcher.compute(ap, bp))
+        if fixed.dtype != np.dtype("int16") or fixed.shape != ap.shape[:2]:
+            raise StereoMatchingError("OpenCV StereoSGBM returned an unexpected disparity dtype or shape")
+        return np.ascontiguousarray(fixed[:, pad:])
+
+    forward = compute(left, right)
+    reverse = compute(np.ascontiguousarray(right[:, ::-1]), np.ascontiguousarray(left[:, ::-1]))[:, ::-1]
+    return forward, np.ascontiguousarray(reverse)
 
 
 def reverse_correspondence_support(forward: np.ndarray, reverse: np.ndarray) -> np.ndarray:
@@ -908,6 +959,12 @@ def run_stereo_matching(
     ):
         raise StereoMatchingError("StereoSGBM block size must be an odd integer in [3, 21]")
     num_disparities = _stereo_search_range(left_array.shape[1], settings.maximum_disparity)
+    try:
+        sigma = float(settings.noise_sigma_pixels)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise StereoMatchingError("StereoSGBM noise sigma must be finite and in [0, 3] pixels") from exc
+    if isinstance(settings.noise_sigma_pixels, bool) or not math.isfinite(sigma) or not 0 <= sigma <= 3:
+        raise StereoMatchingError("StereoSGBM noise sigma must be finite and in [0, 3] pixels")
 
     try:
         import cv2  # type: ignore[import-not-found]
@@ -917,6 +974,16 @@ def run_stereo_matching(
         ) from exc
 
     right_array, right_valid, registration = register_stereo_rows(left_array, right_array)
+
+    # Compare structure observable in both cameras. A mild, symmetric low-pass
+    # reduces mismatched sharpening/sensor noise without borrowing color detail
+    # as depth. The raw views, output grid, and disparity units are unchanged.
+    matching_left, matching_right = left_array, right_array
+    radius = int(math.ceil(3 * sigma))
+    if radius:
+        kernel = (2 * radius + 1, 2 * radius + 1)
+        matching_left = cv2.GaussianBlur(left_array, kernel, sigma, borderType=cv2.BORDER_REFLECT_101)
+        matching_right = cv2.GaussianBlur(right_array, kernel, sigma, borderType=cv2.BORDER_REFLECT_101)
 
     channels = int(left_array.shape[2])
     block_area = settings.block_size * settings.block_size
@@ -934,12 +1001,7 @@ def run_stereo_matching(
         "mode": cv2.STEREO_SGBM_MODE_SGBM_3WAY,
     }
     try:
-        matcher = cv2.StereoSGBM.create(**parameters)
-        fixed_disparity = np.asarray(matcher.compute(left_array, right_array))
-        # OpenCV's disp12 check reuses the forward cost; independently match
-        # the reverse pair as well. Flipping keeps the same positive search range.
-        reverse_fixed = matcher.compute(np.ascontiguousarray(right_array[:, ::-1]),
-                                        np.ascontiguousarray(left_array[:, ::-1]))[:, ::-1]
+        fixed_disparity, reverse_fixed = _sgbm_correspondences(matching_left, matching_right, parameters)
     except Exception as exc:
         raise StereoMatchingError(
             "OpenCV StereoSGBM failed at full "
@@ -975,7 +1037,7 @@ def run_stereo_matching(
         disparity + principal_point_delta, dtype=np.float32
     )
     in_bounds = correspondence_validity(-disparity, right_valid)
-    photometric, support_details = stereo_photometric_support(left_array, right_array, disparity)
+    photometric, support_details = stereo_photometric_support(left_array, right_array, disparity, sigma)
     accepted = valid & (height > 0) & in_bounds & consistent & photometric
     # Consistency rejection can split formerly connected false matches into
     # islands. Filter *after* that rejection, retaining accepted codes exactly.
@@ -998,6 +1060,24 @@ def run_stereo_matching(
         "gamma_correction": False,
         "normalization": False,
         "vertical_registration": registration,
+        "matching_prefilter": {
+            "method": "Gaussian on inference copies" if radius else "disabled",
+            "sigma_pixels": sigma, "kernel_size": 2 * radius + 1,
+            "border_mode": "BORDER_REFLECT_101", "input_and_output_dtype": "uint8",
+            "rounding": "OpenCV uint8 convolution rounding",
+            "raw_assets_modified": False, "reference_view": "left",
+            "output_depth_filtering": False,
+        },
+        "computational_border": {
+            "left_padding_pixels_per_direction": num_disparities,
+            "mode": "BORDER_REPLICATE", "output_padding_removed": True,
+            "purpose": "avoid SGBM full-search-width exclusion of real edge pixels",
+            "acceptance_coordinates": "original unpadded views; padded correspondences are rejected",
+        },
+        "input_left_sha256": _array_sha256(left_array),
+        "input_right_sha256": _array_sha256(right_array),
+        "matching_left_sha256": _array_sha256(matching_left),
+        "matching_right_sha256": _array_sha256(matching_right),
         "photometric_support": support_details,
         "photometrically_unsupported_pixel_count": int(np.count_nonzero(valid & ~photometric)),
         "out_of_view_pixel_count": int(np.count_nonzero(~in_bounds)),

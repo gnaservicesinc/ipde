@@ -77,6 +77,7 @@ class ExtractOptions:
     color_matching_hero: str = "left"
     write_displacement_maps: bool = False
     stereo_maximum_disparity: int | None = None
+    stereo_noise_sigma_pixels: float = 1.0
     raft_root: Path | None = None
     raft_model: Path | None = None
     raft_model_member: str | None = None
@@ -1631,6 +1632,7 @@ def extract_file(source: Path | str, options: ExtractOptions | None = None) -> d
                     discovery.spatial_photo,
                     StereoMatchingOptions(
                         maximum_disparity=config.stereo_maximum_disparity,
+                        noise_sigma_pixels=config.stereo_noise_sigma_pixels,
                     ),
                 )
             except StereoMatchingError as exc:

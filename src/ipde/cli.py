@@ -63,6 +63,10 @@ def _parser() -> argparse.ArgumentParser:
         help="classical matching search range (default: one eighth of the full stereo width)",
     )
     parser.add_argument(
+        "--stereo-noise-sigma", type=float, default=1.0, metavar="PIXELS",
+        help="classical shared-detail Gaussian scale in pixels, 0 to disable (default: 1; maximum: 3); raw assets unchanged",
+    )
+    parser.add_argument(
         "--color-matching",
         action="store_true",
         help="histogram-match the non-Hero stereo view's RGB channels before inference",
@@ -179,6 +183,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         color_matching_hero=args.color_hero,
                         write_displacement_maps=args.displacement_maps,
                         stereo_maximum_disparity=args.stereo_max_disparity,
+                        stereo_noise_sigma_pixels=args.stereo_noise_sigma,
                         raft_root=args.raft_root,
                         raft_model=args.raft_model,
                         raft_model_member=args.raft_model_member,

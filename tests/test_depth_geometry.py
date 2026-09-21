@@ -5,21 +5,80 @@ import cv2
 import numpy as np
 
 from ipde.spatial import (
-    DisplacementMappingError, StereoMatchingOptions, correspondence_validity,
+    DisplacementMappingError, StereoMatchingError, StereoMatchingOptions, correspondence_validity,
     linear_depth_displacement, register_stereo_rows, run_stereo_matching,
     reverse_correspondence_support, stereo_photometric_support,
 )
 
 
 class DepthGeometryTests(unittest.TestCase):
+    @staticmethod
+    def shifted_pair():
+        rng = np.random.default_rng(211)
+        left = cv2.GaussianBlur(rng.integers(20, 236, (96, 256, 3), np.uint8), (3, 3), .6)
+        right = np.zeros_like(left)
+        right[:, :-8] = left[:, 8:]
+        calibration = {"left_camera": {"width": 256, "height": 96},
+                       "rectified_stereo_ready": True, "principal_point_delta_x_pixels": 0}
+        return left, right, calibration, rng
+
+    def test_search_range_does_not_remove_observed_edge_geometry(self):
+        left, right, calibration, _ = self.shifted_pair()
+        original_left, original_right = left.copy(), right.copy()
+        # The true shift is 8 pixels, not the 64/96-pixel search limit. Both
+        # directions must recover the original image edges where overlap exists.
+        for search in (64, 96):
+            result = run_stereo_matching(left, right, calibration,
+                                        StereoMatchingOptions(maximum_disparity=search))
+            depth = result.height_disparity_pixels
+            self.assertEqual(depth.shape, left.shape[:2])
+            for band in (depth[12:-12, 24:60], depth[12:-12, 200:-12]):
+                self.assertGreater(np.isfinite(band).mean(), .98)
+                self.assertLess(np.nanmax(abs(band - 8)), .2)
+            # These left pixels have no partner in the actual right image.
+            # Replicated computational padding cannot supply one.
+            self.assertTrue(np.isnan(depth[:, :8]).all())
+        np.testing.assert_array_equal(left, original_left)
+        np.testing.assert_array_equal(right, original_right)
+
+    def test_unequal_camera_detail_recovers_shift_without_copying_texture(self):
+        left, right, calibration, rng = self.shifted_pair()
+        right = np.clip(cv2.GaussianBlur(right, (5, 5), 1).astype(float)
+                        + rng.normal(0, 5, right.shape), 0, 255).astype(np.uint8)
+        original_left, original_right = left.copy(), right.copy()
+        results = [run_stereo_matching(left, right, calibration,
+                   StereoMatchingOptions(maximum_disparity=64, noise_sigma_pixels=sigma))
+                   .height_disparity_pixels for sigma in (0, 1)]
+        native, shared = [value[12:-12, 24:-12] for value in results]
+        self.assertGreater(np.isfinite(shared).mean(), .9)
+        self.assertGreater(np.isfinite(shared).mean() - np.isfinite(native).mean(), .5)
+        # A constant-depth textured plane must stay flat, even though each
+        # camera has independent high-frequency variation.
+        self.assertLess(np.nanmax(abs(shared - 8)), .2)
+        np.testing.assert_array_equal(left, original_left)
+        np.testing.assert_array_equal(right, original_right)
+
+    def test_shared_detail_cannot_validate_an_unrelated_camera_image(self):
+        left, _, _, rng = self.shifted_pair()
+        right = rng.integers(20, 236, left.shape, np.uint8)
+        supported, _ = stereo_photometric_support(
+            left, right, np.full(left.shape[:2], 8, np.float32))
+        self.assertFalse(supported.any())
+
+    def test_invalid_noise_scales_are_rejected_before_inference(self):
+        left, right, calibration, _ = self.shifted_pair()
+        for sigma in (-.1, 3.1, float("nan"), float("inf"), True, None):
+            with self.subTest(sigma=sigma), self.assertRaisesRegex(StereoMatchingError, "noise sigma"):
+                run_stereo_matching(left, right, calibration,
+                                    StereoMatchingOptions(noise_sigma_pixels=sigma))
+
     def test_reverse_inconsistent_estimates_are_not_exported_as_geometry(self):
         rgb = np.zeros((40, 96, 3), np.uint8)
         forward = np.full((40, 96), 64, np.int16)  # four pixels, fixed point
         reverse = forward.copy()
         reverse[10:30, 36:56] = 192  # contradictory twelve-pixel match
-        with (patch("cv2.StereoSGBM.create") as create,
+        with (patch("ipde.spatial._sgbm_correspondences", return_value=(forward, reverse)),
               patch("ipde.spatial.stereo_photometric_support", return_value=(np.ones((40, 96), bool), {}))):
-            create.return_value.compute.side_effect = [forward, reverse[:, ::-1]]
             result = run_stereo_matching(rgb, rgb, {
                 "left_camera": {"width": 96, "height": 40},
                 "rectified_stereo_ready": True, "principal_point_delta_x_pixels": 0,
@@ -38,9 +97,8 @@ class DepthGeometryTests(unittest.TestCase):
         calibration = {"left_camera": {"width": 96, "height": 40},
                        "rectified_stereo_ready": True, "principal_point_delta_x_pixels": 0,
                        "focal_length_pixels_for_depth": 100, "baseline_meters": .1}
-        with (patch("cv2.StereoSGBM.create") as create,
+        with (patch("ipde.spatial._sgbm_correspondences", return_value=(forward, reverse)),
               patch("ipde.spatial.stereo_photometric_support", return_value=(np.ones((40, 96), bool), {}))):
-            create.return_value.compute.side_effect = [forward, reverse[:, ::-1]]
             result = run_stereo_matching(rgb, rgb, calibration, StereoMatchingOptions(maximum_disparity=16))
         self.assertTrue(np.isnan(result.height_disparity_pixels[16:24, 48:56]).all())
         mapped, details = linear_depth_displacement(result.height_disparity_pixels, calibration)
@@ -116,8 +174,7 @@ class DepthGeometryTests(unittest.TestCase):
     def test_flat_bidirectionally_consistent_regions_are_not_geometry(self):
         rgb = np.full((64, 96, 3), 80, np.uint8)
         fake = np.full((64, 96), 16, np.int16)
-        with patch("cv2.StereoSGBM.create") as create:
-            create.return_value.compute.side_effect = [fake, fake.copy()]
+        with patch("ipde.spatial._sgbm_correspondences", return_value=(fake, fake.copy())):
             result = run_stereo_matching(rgb, rgb, {
                 "left_camera": {"width": 96, "height": 64},
                 "rectified_stereo_ready": True, "principal_point_delta_x_pixels": 0,
