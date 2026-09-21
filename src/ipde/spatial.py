@@ -58,6 +58,8 @@ class RaftStereoResult:
     height_disparity_pixels: np.ndarray
     depth_meters: np.ndarray
     details: dict[str, Any]
+    # Validation is evidence about an estimate, not a replacement sample value.
+    support_mask: np.ndarray | None = None
 
 
 @dataclass
@@ -810,8 +812,9 @@ def stereo_photometric_support(
     """Reject unsupported classical matches without changing accepted disparities.
 
     Bidirectional SGBM can agree on a false match in flat patches or along a
-    single edge (the aperture problem). Require local contrast in two directions
-    in both views and a positive, exposure-independent patch correlation.
+    horizontal edge (the aperture problem). For rectified stereo, only horizontal
+    translation is unknown: a vertical edge DOES constrain it. Requiring a 2-D
+    corner incorrectly discards these correspondences.
     """
     import cv2
 
@@ -829,8 +832,12 @@ def stereo_photometric_support(
     vb = np.maximum(0, mean(b * b) - mb * mb)
     covariance = mean(a * b) - ma * mb
     correlation = covariance / np.sqrt(np.maximum(va * vb, 1e-12))
-    left_texture = cv2.cornerMinEigenVal(left_gray, 9, 3)
-    right_texture = cv2.remap(cv2.cornerMinEigenVal(right_gray, 9, 3), xr, yy, cv2.INTER_LINEAR)
+    def horizontal_information(gray: np.ndarray) -> np.ndarray:
+        # Sobel / 8 gives the central horizontal derivative in code values/pixel.
+        dx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3, scale=1.0 / 8.0)
+        return mean(dx * dx)
+    left_texture = horizontal_information(left_gray)
+    right_texture = cv2.remap(horizontal_information(right_gray), xr, yy, cv2.INTER_LINEAR)
     supported = ((correlation >= .8) & (left_texture >= 1.0) & (right_texture >= 1.0)
                  & np.isfinite(disparity) & (xr >= 4) & (xr <= disparity.shape[1] - 5))
     supported[:4] = False
@@ -838,8 +845,9 @@ def stereo_photometric_support(
     supported[:, :4] = False
     supported[:, -4:] = False
     return supported, {
-        "method": "9x9 normalized patch correlation and two-direction structure tensor",
-        "minimum_correlation": .8, "minimum_structure_eigenvalue_code_squared": 1.0,
+        "method": "9x9 normalized patch correlation and horizontal gradient energy",
+        "minimum_correlation": .8, "minimum_mean_squared_horizontal_gradient": 1.0,
+        "gradient_units": "code values per pixel; Sobel scale 1/8",
         "policy": "unsupported estimates become NaN; accepted disparities are never smoothed or rescaled",
     }
 
@@ -1201,8 +1209,11 @@ def run_raft_stereo(
     in_bounds = correspondence_validity(signed_flow, right_valid)
     consistent = reverse_correspondence_support(signed_flow, reverse_signed_flow)
     accepted = in_bounds & consistent & (height_disparity > 0)
-    height_disparity[~accepted] = np.float32(np.nan)
-    depth_meters[~accepted] = np.float32(np.nan)
+    # Keep the model estimate intact. Occlusions and an independently inferred
+    # reverse field cannot prove a forward prediction wrong. Baking this binary
+    # heuristic into depth created NaN outlines, which downstream displacement
+    # tools commonly interpreted as zero-depth trenches. Export support separately
+    # and offer a deliberately masked product for conservative reconstruction.
     principal_point_delta = np.float32(spatial["principal_point_delta_x_pixels"])
     focal_length = np.float32(spatial["focal_length_pixels_for_depth"])
     baseline = np.float32(spatial["baseline_meters"])
@@ -1231,6 +1242,17 @@ def run_raft_stereo(
         "left_right_consistency": "independent mirrored reverse inference; both neighbors within 1 pixel",
         "inconsistent_pixel_count": int(np.count_nonzero(in_bounds & ~consistent)),
         "raw_signed_flow_filtered": False,
+        "depth_and_disparity_filtered_by_support": False,
+        "support_pixel_count": int(np.count_nonzero(accepted)),
+        "support_pixel_fraction": float(np.mean(accepted)),
+        "support_semantics": (
+            "1 = positive disparity, in-view correspondence and reverse agreement; "
+            "0 = unsupported or occluded estimate, not zero depth. This is a heuristic, not a probability."
+        ),
+        "geometry_policy": (
+            "Dense forward estimate retained, including unverified predictions in occluded regions. "
+            "Use the separate support mask or supported-depth product for conservative reconstruction."
+        ),
         "input_left_sha256": _array_sha256(left_array),
         "input_right_sha256": _array_sha256(right_array),
         "model_internal_downsample_factor": 2 ** configuration.n_downsample,
@@ -1256,7 +1278,7 @@ def run_raft_stereo(
             "RAFT-Stereo is an inferred estimate, not a measured or mathematically exact source depth map."
         ),
     }
-    return RaftStereoResult(signed_flow, height_disparity, depth_meters, details)
+    return RaftStereoResult(signed_flow, height_disparity, depth_meters, details, accepted)
 
 
 def _git_head_if_available(root: Path) -> str | None:

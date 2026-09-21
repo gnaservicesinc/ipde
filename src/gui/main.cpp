@@ -210,8 +210,10 @@ public:
         auto *help = new QLabel(QStringLiteral(
             "Check individual outputs, then Export checked. Or select one row and click Export this map. "
             "Stereo outputs use the left view's pixel grid; the separate display image can have different framing. "
-            "Source precision describes the encoded data. Float EXR storage also holds calculated and inferred values. "
-            "Unsupported stereo matches remain NaN."), central);
+            "For displacement, choose linear depth 0–1 and import the EXR as non-color data. "
+            "For viewing, choose Depth preview. Signed flow and pixel disparity are diagnostics, not brightness. "
+            "RAFT dense estimates retain unverified predictions; the support mask identifies unknown regions. "
+            "Supported depth and classical matches leave unknown pixels as NaN, not zero depth."), central);
         help->setWordWrap(true);
         root->addWidget(help);
 

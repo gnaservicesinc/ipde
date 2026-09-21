@@ -115,16 +115,25 @@ pixel-disparity maps:
   match must agree within one pixel at both bracketing coordinates. Small disparity
   components (200 pixels or fewer, with a two-pixel neighbor tolerance) are rejected
   after consistency and photometric checking. A 9×9 patch must have correlation
-  at least 0.8 and structure-tensor minimum eigenvalue at least 1 code² in both
-  views. Flat surfaces and single edges can otherwise agree on a false near-zero
+  at least 0.8 and mean squared **horizontal** gradient at least 1 in both
+  views (Sobel derivative scaled by 1/8, in code values per pixel). Rectified
+  stereo searches in one dimension; vertical edges constrain that search and
+  must not be rejected merely for lacking a 2-D corner. Flat surfaces and
+  horizontal edges can otherwise agree on a false near-zero
   disparity in both directions, producing enormous false distances. These checks
   reject unsupported values as NaN; accepted samples are never smoothed or filled.
 - `<name>_spatial_raft_stereo_height.exr` uses the official
   [Princeton RAFT-Stereo](https://github.com/princeton-vl/RAFT-Stereo) model. It is
   checked against an independent mirrored reverse inference. The forward and
   reverse correspondences must agree within one pixel at both bracketing
-  coordinates; failures become NaN in depth/disparity/displacement. The signed
-  flow diagnostic retains the untouched forward result. This roughly doubles
+  coordinates. This check produces a **separate support mask**; it does not erase
+  forward estimates from depth/disparity/displacement. Previous versions replaced
+  failures with NaN, cutting outlines into otherwise dense predictions. Programs
+  that display NaN as black, or displace it to zero, made those outlines look like
+  trenches. The new dense outputs preserve the predictions, including unverified
+  estimates at occlusions and image boundaries. Select **RAFT supported depth**
+  for the conservative, masked result. The signed flow diagnostic always retains
+  the untouched forward result. Reverse inference roughly doubles
   inference time. Learned convex upsampling from the model's internal coarse
   grid can still smooth fine detail: native-sized output is not evidence of
   independent measurements at every pixel.
@@ -147,8 +156,9 @@ matrix, support counts, residuals, and interpolation policy are embedded in each
 inference EXR, including when the JSON manifest is disabled.
 
 Correspondences outside the right image or across padded registration borders
-are excluded from depth and displacement as NaN. RAFT signed-flow diagnostics
-still preserve the original model output. This validation cannot identify every
+are marked unsupported. Classical matches and RAFT's explicitly selected supported
+depth product exclude them as NaN. RAFT's dense estimates retain them, with the
+support policy recorded in the EXR. This validation cannot identify every
 inference error or recover geometry the cameras did not observe.
 
 The GUI offers **Color Matching** as an opt-in inference preprocessing step. The selected
@@ -172,8 +182,10 @@ specialist diagnostic EXRs. All are read back bit-for-bit before commit:
 ```text
 signed_flow = RAFT(left, right)                   # x_right - x_left, pixels
 height = (cx_right - cx_left) - signed_flow    # near is generally high
-height[invalid_or_out_of_view] = NaN           # invalid correspondence, not abs()
+height[nonfinite_or_negative] = NaN           # impossible disparity, not abs()
 depth_meters = float32(focal_px * baseline_m) / height
+support = positive_disparity & in_view & reverse_consistent
+supported_depth = where(support, depth_meters, NaN)  # separate, opt-in product
 ```
 
 - `<name>_spatial_raft_stereo_height.exr` is the raw pixel-disparity map:
@@ -195,8 +207,8 @@ converting a disparity EXR to integer PNG without an explicit display range ofte
 turns every positive value into white and every `NaN` into black. That PNG is a
 clipped validity mask, not a faithful rendering of the height values.
 
-For software that expects a `0..1` displacement range, select **RAFT linear depth —
-0–1 displacement** (or its classical counterpart) in the GUI. CLI users can
+For software that expects a `0..1` displacement range, select **RAFT dense estimate —
+linear depth 0–1 displacement** (or its classical counterpart) in the GUI. CLI users can
 select it with `--select raft-displacement --no-npy`, or add it to legacy exports
 with `--displacement-maps`. IPDE then writes
 separately named full-resolution float32 derivatives:
@@ -224,6 +236,22 @@ bounds in meters and the displacement scale (`far_m - near_m`), so the height
 can be converted back to distance. Raw extracted data is never normalized by
 requesting this explicit derivative. A full perspective reconstruction also
 requires camera intrinsics; a 2D displacement texture alone is not a point cloud.
+
+For inspection, select **RAFT depth preview** (`--select raft-preview`) or
+**Classical depth preview** (`--select stereo-preview`). These explicitly named
+`_depth_preview.png` files map the same full linear-depth range to 16-bit gray,
+with nearer geometry white. Missing values are transparent rather than black.
+PNG metadata records the depth bounds, mapping, and quantization. Previews are
+for viewing only; use float EXR for displacement. No gamma or tone mapping is
+applied to either the preview or the scientific data.
+
+`--select raft-support` exports a float EXR with 1 for supported correspondence
+and 0 for unsupported/occluded estimates. This mask is not depth or a confidence
+probability. `--select raft-supported-depth` exports metric depth with unsupported
+pixels as NaN. The equivalent `stereo-support` and `stereo-supported-depth`
+products expose the sparse classical result. Preview alpha indicates whether an
+estimate exists, not whether it passes support checks. All products remain
+individually selectable; requesting one does not silently write the others.
 
 These optional derivatives incur float32 rounding. They cannot fix every bad
 stereo estimate: untextured, blurred, or occluded regions may remain missing or

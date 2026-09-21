@@ -37,7 +37,8 @@ class SelectionTests(unittest.TestCase):
         self.patcher.start()
         self.addCleanup(self.patcher.stop)
         self.height = np.array([[20, 21, 22], [23, 24, 25]], dtype=np.float32)
-        self.raft = RaftStereoResult(-self.height, self.height, 1 / self.height, {})
+        self.support = np.array([[True, False, True], [False, True, True]])
+        self.raft = RaftStereoResult(-self.height, self.height, 1 / self.height, {}, self.support)
 
     def export(self, *selection, **kwargs):
         return extract_file(self.source, ExtractOptions(
@@ -146,3 +147,46 @@ class SelectionTests(unittest.TestCase):
     def test_inventory_exposes_raw_and_generated_choices(self):
         products = {p["id"] for p in inspect_file(self.source)["available_products"]}
         self.assertTrue({"raw:0", "raw:1", "raft-height", "raft-displacement", "stereo-height"} <= products)
+
+    def test_dense_and_supported_depth_are_distinct_exact_products(self):
+        with patch("ipde.extractor.run_raft_stereo", return_value=self.raft):
+            self.export("raft-depth", "raft-supported-depth", "raft-support")
+        root = self.directory / "out"
+        dense = read_exr_exact(root / "photo_spatial_raft_stereo_depth_meters.exr", (2, 3))
+        checked = read_exr_exact(root / "photo_spatial_raft_stereo_supported_depth_meters.exr", (2, 3))
+        support = read_exr_exact(root / "photo_spatial_raft_stereo_support.exr", (2, 3))
+        np.testing.assert_array_equal(dense, self.raft.depth_meters)
+        np.testing.assert_array_equal(checked[self.support], dense[self.support])
+        self.assertTrue(np.isnan(checked[~self.support]).all())
+        np.testing.assert_array_equal(support, self.support.astype(np.float32))
+        np.testing.assert_array_equal(self.raft.height_disparity_pixels, self.height)
+
+    def test_preview_maps_depth_not_signed_flow_and_keeps_raw_unchanged(self):
+        with patch("ipde.extractor.run_raft_stereo", return_value=self.raft):
+            self.export("raft-preview")
+        self.assertEqual(self.files(), {"photo_spatial_raft_stereo_depth_preview.png"})
+        path = self.directory / "out/photo_spatial_raft_stereo_depth_preview.png"
+        result = read_png_exact(path)
+        depth = 1 / self.height
+        expected = np.rint(((depth.max()-depth)/(depth.max()-depth.min())).astype(np.float64)*65535).astype(np.uint16)
+        np.testing.assert_array_equal(result[:, :, 0], expected)
+        self.assertTrue((result[:, :, 1] == 65535).all())
+        self.assertIn(b'"preview_only": true', path.read_bytes())
+        np.testing.assert_array_equal(self.raft.signed_flow_pixels, -self.height)
+
+    def test_classical_empty_preview_is_transparent_and_runs_no_raft(self):
+        sparse = StereoMatchingResult(np.full((2, 3), np.nan, np.float32), {})
+        with patch("ipde.extractor.run_stereo_matching", return_value=sparse), patch("ipde.extractor.run_raft_stereo") as raft:
+            self.export("stereo-preview", "stereo-support")
+        raft.assert_not_called()
+        preview = read_png_exact(self.directory / "out/photo_spatial_stereo_matching_depth_preview.png")
+        self.assertFalse(preview.any())
+
+    def test_new_product_collision_preflight_avoids_expensive_inference(self):
+        out = self.directory / "out"
+        out.mkdir()
+        (out / "photo_spatial_raft_stereo_depth_preview.png").write_bytes(b"existing")
+        with patch("ipde.extractor.run_raft_stereo") as raft:
+            with self.assertRaisesRegex(ExtractionError, "already exists"):
+                self.export("raft-preview")
+        raft.assert_not_called()

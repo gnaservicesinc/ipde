@@ -56,7 +56,7 @@ def _normalized_png_array(array: np.ndarray) -> tuple[np.ndarray, int]:
     return np.ascontiguousarray(value), channels
 
 
-def write_png(path: Path, array: np.ndarray) -> None:
+def write_png(path: Path, array: np.ndarray, *, attributes: Mapping[str, str] | None = None) -> None:
     """Write unsigned samples directly to PNG without Pillow conversions."""
     value, channels = _normalized_png_array(array)
     height, width = value.shape[:2]
@@ -70,9 +70,16 @@ def write_png(path: Path, array: np.ndarray) -> None:
         row_bytes = width * channels
     scanlines = b"".join(b"\x00" + encoded[offset : offset + row_bytes] for offset in range(0, len(encoded), row_bytes))
     ihdr = struct.pack(">IIBBBBB", width, height, bit_depth, _PNG_COLOR_TYPES[channels], 0, 0, 0)
+    metadata = bytearray()
+    for key, value in (attributes or {}).items():
+        keyword = key.encode("latin-1")
+        if not 1 <= len(keyword) <= 79 or b"\x00" in keyword:
+            raise FormatError("PNG metadata keywords must be 1..79 non-null Latin-1 bytes")
+        metadata.extend(_png_chunk(b"iTXt", keyword + b"\x00\x00\x00\x00\x00" + value.encode("utf-8")))
     payload = (
         PNG_SIGNATURE
         + _png_chunk(b"IHDR", ihdr)
+        + metadata
         + _png_chunk(b"IDAT", zlib.compress(scanlines, level=9))
         + _png_chunk(b"IEND", b"")
     )

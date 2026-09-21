@@ -145,6 +145,45 @@ class DepthGeometryTests(unittest.TestCase):
         self.assertTrue(accepted[0, 3:].all())
         self.assertFalse(accepted[1, 5:7].any())
 
+    def test_rectified_stereo_needs_horizontal_information_not_corners(self):
+        # Texture constant along y has no 2-D corners, but its x shift is observable.
+        rng = np.random.default_rng(16)
+        stripe = rng.integers(30, 190, (1, 160, 1), np.uint8)
+        left = np.tile(stripe, (64, 1, 3))
+        right = np.zeros_like(left)
+        right[:, :-8] = left[:, 8:]
+        disparity = np.full((64, 160), 8, np.float32)
+        supported, _ = stereo_photometric_support(left, right, disparity)
+        self.assertTrue(supported[8:-8, 20:-12].all())
+        result = run_stereo_matching(left, right, {
+            "left_camera": {"width": 160, "height": 64},
+            "rectified_stereo_ready": True, "principal_point_delta_x_pixels": 0,
+        }, StereoMatchingOptions(maximum_disparity=16))
+        core = result.height_disparity_pixels[8:-8, 24:-24]
+        self.assertGreater(np.isfinite(core).mean(), .95)
+        self.assertLess(np.nanmax(abs(core - 8)), .2)
+        # The transpose varies only vertically: horizontal disparity is unobservable.
+        horizontal_stripes = np.ascontiguousarray(left.transpose(1, 0, 2))
+        unsupported, _ = stereo_photometric_support(
+            horizontal_stripes, horizontal_stripes, np.zeros(horizontal_stripes.shape[:2], np.float32))
+        self.assertFalse(unsupported.any())
+
+    def test_projected_two_plane_scene_preserves_depth_steps(self):
+        # An independent pinhole projection with known f, B, and cx difference:
+        # xL = f*X/Z + cxL; xR = f*(X-B)/Z + cxR.
+        from ipde.spatial import derive_raft_height_and_depth
+        f, baseline, cx_l, cx_r = 800., .06, 300., 307.
+        z = np.array([[.8, 1.2, 2.4]], np.float32)
+        x = np.array([[.1, -.2, .3]], np.float32)
+        xl = f * x / z + cx_l
+        xr = f * (x - baseline) / z + cx_r
+        disparity, depth = derive_raft_height_and_depth(xr - xl, {
+            "focal_length_pixels_for_depth": f, "baseline_meters": baseline,
+            "principal_point_delta_x_pixels": cx_r-cx_l,
+        })
+        np.testing.assert_allclose(depth, z, rtol=2e-6)
+        np.testing.assert_allclose(disparity, f*baseline/z, rtol=2e-6)
+
 
 if __name__ == "__main__":
     unittest.main()
