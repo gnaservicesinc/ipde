@@ -1,5 +1,9 @@
 # Training settings and throughput validation — 2026-10-10
 
+Subsequent GPU submission and checkpoint work is recorded in
+[the throughput investigation](native-training-throughput-2026-10-10.md).
+The measurements below describe the preceding implementation.
+
 Host: Apple M2 Max, 64 GiB unified memory, macOS 27.2, Xcode 27.2.
 
 ## Installed-model engine measurements

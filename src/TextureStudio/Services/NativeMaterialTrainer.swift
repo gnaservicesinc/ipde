@@ -155,6 +155,8 @@ enum NativeMaterialTrainer {
     }
     static func train(_ options: Options, onEvent: Event, control: NativeMaterialTrainingControl, model suppliedModel: NativeMaterialModel? = nil,
                       now: @Sendable () -> ContinuousClock.Instant = { .now }) throws -> String {
+        let activity = ProcessInfo.processInfo.beginActivity(options: .userInitiated, reason: "Training the requested material model")
+        defer { ProcessInfo.processInfo.endActivity(activity) }
         try control.check()
         func setup(_ label: String, step: Int, requested: Int? = nil, maps: Int? = nil) throws {
             var event: [String: Any] = ["event": "training_setup", "operation": label,
@@ -344,6 +346,7 @@ enum NativeMaterialTrainer {
                     let updateStarted = now()
                     var accumulated = NativeMaterialGradientAccumulator()
                     var valueLoss = Double(0), detailLoss = Double(0), totalLoss = Double(0)
+                    var dataPreparationSeconds = 0.0
                     let rate = options.effectiveLearningRate(update: completed + 1, totalUpdates: requestedUpdates)
                     for microbatch in 0..<options.gradientAccumulationSteps {
                         let accumulatedSample: NativeMaterialDatasetService.TrainingSample
@@ -360,7 +363,9 @@ enum NativeMaterialTrainer {
                             "accumulation_step": microbatch + 1, "learning_rate": rate,
                             "operation": "Accumulating map gradients"])
                         let derivative = try autoreleasepool {
+                            let loadingStarted = ProcessInfo.processInfo.systemUptime
                             let data = try pair(accumulatedSample)
+                            dataPreparationSeconds += ProcessInfo.processInfo.systemUptime - loadingStarted
                             return try program.execute(rgb: data.0, adapters: model.adapterWeights, reference: data.1,
                             gradientsOnly: true,
                             featureKey: accumulatedSample.inputSHA256 + ":" + accumulatedSample.inputEncoding, checkCancellation: { try control.check() }, onStage: { done, total in
@@ -381,8 +386,10 @@ enum NativeMaterialTrainer {
                     }
                     try control.check()
                     try emit(["event": "operation_progress", "phase": "training", "operation": "Applying optimizer update", "completed": 0, "total": 1])
+                    let optimizerStarted = ProcessInfo.processInfo.systemUptime
                     let update = try NativeMaterialOptimizer.apply(gradients: accumulated.averaged(), weights: model.adapterWeights,
                         state: optimizer, learningRate: rate, step: completed + 1, configuration: options.optimizerConfiguration)
+                    let optimizerSeconds = ProcessInfo.processInfo.systemUptime - optimizerStarted
                     try control.check()
                     model.updateAdapters(update.weights); optimizer = update.state
                     try emit(["event": "operation_progress", "phase": "training", "operation": "Applying optimizer update", "completed": 1, "total": 1])
@@ -392,6 +399,8 @@ enum NativeMaterialTrainer {
                         "value_l1": valueLoss / Double(accumulated.count), "detail_l1": detailLoss / Double(accumulated.count), "total": totalLoss / Double(accumulated.count),
                         "learning_rate": rate, "accumulated_samples": accumulated.count, "gradient_norm": update.gradientNorm,
                         "native_dimensions": [options.size, options.size],
+                        "data_preparation_seconds": dataPreparationSeconds, "optimizer_seconds": optimizerSeconds,
+                        "cumulative_engine_statistics": try JSONSerialization.jsonObject(with: JSONEncoder().encode(program.executionStatistics)),
                         "update_duration_seconds": seconds(updateStarted.duration(to: now()))])
                     if control.shouldStopAndSave || timeLimitReached() { break }
                     if control.consumeCheckpoint() || options.checkpointEvery > 0 && completed % options.checkpointEvery == 0 { _ = try save() }

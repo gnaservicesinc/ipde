@@ -1,0 +1,1707 @@
+{
+  "machine": {
+    "model": "Apple M2 Max",
+    "cpu_cores": 12,
+    "physical_memory_bytes": 68719476736,
+    "os": "macOS 27.2",
+    "configuration": "arm64 Release"
+  },
+  "base_sha256": "3f25b03e950c6199b53a3e1581296831e71555e1928ad209232b757f75153b7d",
+  "measurement_scope": "Individual fresh-process arm64 Release measurements with report-specific settings: exact synthetic Float32 grids or explicitly identified native crops of real 16-bit maps. Synthetic engine timings and complete dataset-job timings are separate. Numerical/resource checks do not establish material quality.",
+  "engine_runs": {
+    "baseline-activity-1024": {
+      "source_report": "out/training-throughput-audit/baseline-activity-1024.json",
+      "size": 1024,
+      "scope": "map-decoder",
+      "rank": 64,
+      "alpha": 16,
+      "observations": [
+        {
+          "cumulative_execution": {
+            "compilations": 553,
+            "compilationSeconds": 115.49406599997747,
+            "executionSeconds": 44.038950124966505,
+            "packageLoadSeconds": 1.134629041676817,
+            "stages": 912
+          },
+          "loss": 5.1684699058532715,
+          "metal_allocated_bytes": 3654909952,
+          "peak_physical_footprint_bytes": 25445517952,
+          "seconds": 165.67075945833494,
+          "step": 1
+        },
+        {
+          "cumulative_execution": {
+            "compilations": 553,
+            "compilationSeconds": 115.49406599997747,
+            "executionSeconds": 82.04004162504862,
+            "packageLoadSeconds": 2.158344375042361,
+            "stages": 1785
+          },
+          "loss": 5.166247844696045,
+          "metal_allocated_bytes": 5663981568,
+          "peak_physical_footprint_bytes": 26502368160,
+          "seconds": 39.9391456250014,
+          "step": 2
+        },
+        {
+          "cumulative_execution": {
+            "compilations": 553,
+            "compilationSeconds": 115.49406599997747,
+            "executionSeconds": 125.34664654168591,
+            "packageLoadSeconds": 3.3299391668479075,
+            "stages": 2697
+          },
+          "loss": 5.16115140914917,
+          "metal_allocated_bytes": 4053368832,
+          "peak_physical_footprint_bytes": 26502368160,
+          "seconds": 45.51196399999753,
+          "step": 3
+        }
+      ]
+    },
+    "layout-1024": {
+      "source_report": "out/training-throughput-audit/layout-1024.json",
+      "size": 1024,
+      "scope": "map-decoder",
+      "rank": 64,
+      "alpha": 16,
+      "observations": [
+        {
+          "cumulative_execution": {
+            "commandBuffers": 743,
+            "compilations": 553,
+            "compilationSeconds": 116.4309247084675,
+            "executionSeconds": 12.585984666664444,
+            "finalCommandBufferGPUSeconds": 4.196222833452339,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 0.9961439167309436,
+            "peakCheckpointBytes": 21374187008,
+            "recomputedStages": 107,
+            "stages": 743,
+            "waitSeconds": 11.93780237500323
+          },
+          "loss": 5.1684699058532715,
+          "metal_allocated_bytes": 3652812800,
+          "peak_physical_footprint_bytes": 36809771864,
+          "seconds": 147.24771129166038,
+          "step": 1
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 1447,
+            "compilations": 553,
+            "compilationSeconds": 116.4309247084675,
+            "executionSeconds": 21.141828500054544,
+            "finalCommandBufferGPUSeconds": 8.280603000152041,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 1.9428253751175362,
+            "peakCheckpointBytes": 21374187008,
+            "recomputedStages": 214,
+            "stages": 1447,
+            "waitSeconds": 35.82665920818545
+          },
+          "loss": 5.166247844696045,
+          "metal_allocated_bytes": 5668175872,
+          "peak_physical_footprint_bytes": 36809771864,
+          "seconds": 34.35183537499688,
+          "step": 2
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 2190,
+            "compilations": 553,
+            "compilationSeconds": 116.4309247084675,
+            "executionSeconds": 31.90635104172543,
+            "finalCommandBufferGPUSeconds": 12.458089208499587,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 2.9730671668366995,
+            "peakCheckpointBytes": 21374187008,
+            "recomputedStages": 321,
+            "stages": 2190,
+            "waitSeconds": 61.97063562495168
+          },
+          "loss": 5.16115140914917,
+          "metal_allocated_bytes": 5668175872,
+          "peak_physical_footprint_bytes": 36809771864,
+          "seconds": 38.93775150000147,
+          "step": 3
+        }
+      ]
+    },
+    "integrated-cold-1024": {
+      "source_report": "out/training-throughput-audit/integrated-cold-1024.json",
+      "size": 1024,
+      "scope": "map-decoder",
+      "rank": 64,
+      "alpha": 16,
+      "observations": [
+        {
+          "cumulative_execution": {
+            "commandBuffers": 743,
+            "compilations": 553,
+            "compilationSeconds": 115.20704591678077,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 10.736484708235366,
+            "finalCommandBufferGPUSeconds": 4.1941119999901275,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 1.017021916602971,
+            "peakCheckpointBytes": 21374187008,
+            "recomputedStages": 107,
+            "stages": 743,
+            "waitSeconds": 26.879763291792187
+          },
+          "loss": 5.1684699058532715,
+          "metal_allocated_bytes": 3652812800,
+          "peak_physical_footprint_bytes": 33910491896,
+          "seconds": 159.01778874999582,
+          "step": 1
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 1447,
+            "compilations": 553,
+            "compilationSeconds": 115.20704591678077,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 18.92692179140431,
+            "finalCommandBufferGPUSeconds": 8.232086291725864,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 1.9888757916196482,
+            "peakCheckpointBytes": 21374187008,
+            "recomputedStages": 214,
+            "stages": 1447,
+            "waitSeconds": 50.36359025010461
+          },
+          "loss": 5.166247844696045,
+          "metal_allocated_bytes": 5668175872,
+          "peak_physical_footprint_bytes": 34689895376,
+          "seconds": 33.55203412499395,
+          "step": 2
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 2190,
+            "compilations": 553,
+            "compilationSeconds": 115.20704591678077,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 29.251890166247904,
+            "finalCommandBufferGPUSeconds": 12.428342000028351,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 3.0640872498988756,
+            "peakCheckpointBytes": 21374187008,
+            "recomputedStages": 321,
+            "stages": 2190,
+            "waitSeconds": 76.39318841692875
+          },
+          "loss": 5.16115140914917,
+          "metal_allocated_bytes": 5668175872,
+          "peak_physical_footprint_bytes": 34695089248,
+          "seconds": 38.3735183333265,
+          "step": 3
+        }
+      ]
+    },
+    "integrated-reused-1024": {
+      "source_report": "out/training-throughput-audit/integrated-reused-1024.json",
+      "size": 1024,
+      "scope": "map-decoder",
+      "rank": 64,
+      "alpha": 16,
+      "observations": [
+        {
+          "cumulative_execution": {
+            "commandBuffers": 743,
+            "compilations": 0,
+            "compilationSeconds": 0,
+            "diskPackageCacheHits": 553,
+            "executionSeconds": 10.691234958336281,
+            "finalCommandBufferGPUSeconds": 4.15584533335641,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 0.914485166722443,
+            "peakCheckpointBytes": 21374187008,
+            "recomputedStages": 107,
+            "stages": 743,
+            "waitSeconds": 25.20734879169322
+          },
+          "loss": 5.1684699058532715,
+          "metal_allocated_bytes": 4594302976,
+          "peak_physical_footprint_bytes": 34655472424,
+          "seconds": 42.60100329166744,
+          "step": 1
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 1447,
+            "compilations": 0,
+            "compilationSeconds": 0,
+            "diskPackageCacheHits": 553,
+            "executionSeconds": 18.930392416732502,
+            "finalCommandBufferGPUSeconds": 8.198035458444792,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 1.7355192916074884,
+            "peakCheckpointBytes": 21374187008,
+            "recomputedStages": 214,
+            "stages": 1447,
+            "waitSeconds": 48.74696466665773
+          },
+          "loss": 5.166247844696045,
+          "metal_allocated_bytes": 4594302976,
+          "peak_physical_footprint_bytes": 35047246944,
+          "seconds": 33.47233637500176,
+          "step": 2
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 2190,
+            "compilations": 0,
+            "compilationSeconds": 0,
+            "diskPackageCacheHits": 553,
+            "executionSeconds": 29.399337666844076,
+            "finalCommandBufferGPUSeconds": 12.32964975017967,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 2.6801976666465634,
+            "peakCheckpointBytes": 21374187008,
+            "recomputedStages": 321,
+            "stages": 2190,
+            "waitSeconds": 74.7739122917992
+          },
+          "loss": 5.16115140914917,
+          "metal_allocated_bytes": 4594302976,
+          "peak_physical_footprint_bytes": 35191409760,
+          "seconds": 38.46928774999833,
+          "step": 3
+        }
+      ]
+    },
+    "final-512": {
+      "source_report": "out/training-throughput-audit/final-512.json",
+      "alpha": 16,
+      "base_sha256": "3f25b03e950c6199b53a3e1581296831e71555e1928ad209232b757f75153b7d",
+      "observations": [
+        {
+          "cumulative_execution": {
+            "commandBuffers": 636,
+            "compilations": 553,
+            "compilationSeconds": 74.53888420837757,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 3.679502708131622,
+            "finalCommandBufferGPUSeconds": 1.5182225415846915,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 0.7921816250382108,
+            "peakCheckpointBytes": 17565758976,
+            "recomputedStages": 0,
+            "stages": 636,
+            "waitSeconds": 5.85604562509252
+          },
+          "loss": 5.184401988983154,
+          "metal_allocated_bytes": 1513783296,
+          "peak_physical_footprint_bytes": 21909883952,
+          "seconds": 88.75916412499646,
+          "step": 1
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 1233,
+            "compilations": 553,
+            "compilationSeconds": 74.53888420837757,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 5.917261458096618,
+            "finalCommandBufferGPUSeconds": 2.9251775416414603,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 1.4711780834186357,
+            "peakCheckpointBytes": 17565758976,
+            "recomputedStages": 0,
+            "stages": 1233,
+            "waitSeconds": 9.501378625172947
+          },
+          "loss": 5.184123992919922,
+          "metal_allocated_bytes": 2528804864,
+          "peak_physical_footprint_bytes": 23659253024,
+          "seconds": 7.334266999998363,
+          "step": 2
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 1869,
+            "compilations": 553,
+            "compilationSeconds": 74.53888420837757,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 8.629165333164565,
+            "finalCommandBufferGPUSeconds": 4.413618333397608,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 2.208606291693286,
+            "peakCheckpointBytes": 17565758976,
+            "recomputedStages": 0,
+            "stages": 1869,
+            "waitSeconds": 13.358706750223064
+          },
+          "loss": 5.189274311065674,
+          "metal_allocated_bytes": 2998566912,
+          "peak_physical_footprint_bytes": 24260267440,
+          "seconds": 8.13821320833813,
+          "step": 3
+        }
+      ],
+      "rank": 64,
+      "scope": "map-decoder",
+      "size": 512
+    },
+    "final-output-1024": {
+      "source_report": "out/training-throughput-audit/final-output-1024.json",
+      "alpha": 16,
+      "base_sha256": "3f25b03e950c6199b53a3e1581296831e71555e1928ad209232b757f75153b7d",
+      "observations": [
+        {
+          "cumulative_execution": {
+            "commandBuffers": 184,
+            "compilations": 172,
+            "compilationSeconds": 54.189856166653044,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 7.121077166637406,
+            "finalCommandBufferGPUSeconds": 0.2196136667189421,
+            "maximumInFlightStages": 1,
+            "packageLoadSeconds": 0.2600893749986426,
+            "peakCheckpointBytes": 7113539584,
+            "recomputedStages": 0,
+            "stages": 184,
+            "waitSeconds": 11.742487208277453
+          },
+          "loss": 5.1684699058532715,
+          "metal_allocated_bytes": 3179642880,
+          "peak_physical_footprint_bytes": 16911485448,
+          "seconds": 75.20208133333654,
+          "step": 1
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 305,
+            "compilations": 172,
+            "compilationSeconds": 54.189856166653044,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 10.819056041604199,
+            "finalCommandBufferGPUSeconds": 0.2503626667166827,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 0.4459201250356273,
+            "peakCheckpointBytes": 7113539584,
+            "recomputedStages": 0,
+            "stages": 305,
+            "waitSeconds": 19.13479933328199
+          },
+          "loss": 5.166359901428223,
+          "metal_allocated_bytes": 3179642880,
+          "peak_physical_footprint_bytes": 17361504992,
+          "seconds": 11.61204391666979,
+          "step": 2
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 489,
+            "compilations": 172,
+            "compilationSeconds": 54.189856166653044,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 17.49014808321226,
+            "finalCommandBufferGPUSeconds": 0.4645490833790973,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 0.7466706250270363,
+            "peakCheckpointBytes": 7113539584,
+            "recomputedStages": 0,
+            "stages": 489,
+            "waitSeconds": 30.354776416614186
+          },
+          "loss": 5.161345481872559,
+          "metal_allocated_bytes": 3345317888,
+          "peak_physical_footprint_bytes": 17667836808,
+          "seconds": 18.604664083330135,
+          "step": 3
+        }
+      ],
+      "rank": 64,
+      "scope": "final-map",
+      "size": 1024
+    },
+    "final-output-512": {
+      "source_report": "out/training-throughput-audit/final-output-512.json",
+      "alpha": 16,
+      "base_sha256": "3f25b03e950c6199b53a3e1581296831e71555e1928ad209232b757f75153b7d",
+      "observations": [
+        {
+          "cumulative_execution": {
+            "commandBuffers": 184,
+            "compilations": 172,
+            "compilationSeconds": 34.7631813749249,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 2.2493084166562767,
+            "finalCommandBufferGPUSeconds": 0.23401000001467764,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 0.24771079173660837,
+            "peakCheckpointBytes": 1778384896,
+            "recomputedStages": 0,
+            "stages": 184,
+            "waitSeconds": 2.8840065833210247
+          },
+          "loss": 5.184401988983154,
+          "metal_allocated_bytes": 1139179520,
+          "peak_physical_footprint_bytes": 5553768944,
+          "seconds": 41.94930487500096,
+          "step": 1
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 305,
+            "compilations": 172,
+            "compilationSeconds": 34.7631813749249,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 3.352238791601849,
+            "finalCommandBufferGPUSeconds": 0.34975754166953266,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 0.40756045834859833,
+            "peakCheckpointBytes": 1778384896,
+            "recomputedStages": 0,
+            "stages": 305,
+            "waitSeconds": 3.732468499991228
+          },
+          "loss": 5.184139251708984,
+          "metal_allocated_bytes": 1778810880,
+          "peak_physical_footprint_bytes": 7022070424,
+          "seconds": 2.4324945416665287,
+          "step": 2
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 489,
+            "compilations": 172,
+            "compilationSeconds": 34.7631813749249,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 5.204797999947914,
+            "finalCommandBufferGPUSeconds": 0.5819941249792464,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 0.6582804166610003,
+            "peakCheckpointBytes": 1778384896,
+            "recomputedStages": 0,
+            "stages": 489,
+            "waitSeconds": 4.9294302499693
+          },
+          "loss": 5.189287185668945,
+          "metal_allocated_bytes": 2447802368,
+          "peak_physical_footprint_bytes": 7927990960,
+          "seconds": 3.7050914999999804,
+          "step": 3
+        }
+      ],
+      "rank": 64,
+      "scope": "final-map",
+      "size": 512
+    },
+    "coarse-rank8-1024": {
+      "source_report": "out/training-throughput-audit/coarse-rank8-1024.json",
+      "alpha": 8,
+      "base_sha256": "3f25b03e950c6199b53a3e1581296831e71555e1928ad209232b757f75153b7d",
+      "coalesce_active_blocks": true,
+      "fast_convolution_transforms": false,
+      "observations": [
+        {
+          "cumulative_execution": {
+            "commandBuffers": 222,
+            "compilations": 198,
+            "compilationSeconds": 68.1208052083166,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 19.72173883332289,
+            "finalCommandBufferGPUSeconds": 0.33134304162376793,
+            "maximumInFlightStages": 1,
+            "packageLoadSeconds": 0.34822266663832124,
+            "peakCheckpointBytes": 8522825728,
+            "recomputedStages": 10,
+            "stages": 222,
+            "waitSeconds": 14.718861208370072
+          },
+          "loss": 5.1684699058532715,
+          "metal_allocated_bytes": 4854743040,
+          "peak_physical_footprint_bytes": 32100108880,
+          "seconds": 106.313254458335,
+          "step": 1
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 405,
+            "compilations": 198,
+            "compilationSeconds": 68.1208052083166,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 28.325433250080096,
+            "finalCommandBufferGPUSeconds": 0.5254427082618349,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 0.6628366665972862,
+            "peakCheckpointBytes": 8522825728,
+            "recomputedStages": 20,
+            "stages": 405,
+            "waitSeconds": 28.91433862508711
+          },
+          "loss": 5.167387008666992,
+          "metal_allocated_bytes": 8126300160,
+          "peak_physical_footprint_bytes": 32100108880,
+          "seconds": 23.531695083329396,
+          "step": 2
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 627,
+            "compilations": 198,
+            "compilationSeconds": 68.1208052083166,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 39.12738162508322,
+            "finalCommandBufferGPUSeconds": 0.8520254582472262,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 1.0602938332303893,
+            "peakCheckpointBytes": 8522825728,
+            "recomputedStages": 30,
+            "stages": 627,
+            "waitSeconds": 45.60652062516601
+          },
+          "loss": 5.162982940673828,
+          "metal_allocated_bytes": 8126300160,
+          "peak_physical_footprint_bytes": 32100108880,
+          "seconds": 28.364049000003433,
+          "step": 3
+        }
+      ],
+      "rank": 8,
+      "scope": "map-decoder",
+      "size": 1024
+    },
+    "fine-rank8-1024": {
+      "source_report": "out/training-throughput-audit/fine-rank8-1024.json",
+      "alpha": 8,
+      "base_sha256": "3f25b03e950c6199b53a3e1581296831e71555e1928ad209232b757f75153b7d",
+      "coalesce_active_blocks": false,
+      "fast_convolution_transforms": false,
+      "observations": [
+        {
+          "cumulative_execution": {
+            "commandBuffers": 743,
+            "compilations": 553,
+            "compilationSeconds": 112.3322811249891,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 11.203717541757214,
+            "finalCommandBufferGPUSeconds": 4.178643083294446,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 0.9413733749097446,
+            "peakCheckpointBytes": 21374187008,
+            "recomputedStages": 107,
+            "stages": 743,
+            "waitSeconds": 26.98988112492225
+          },
+          "loss": 5.1684699058532715,
+          "metal_allocated_bytes": 3652943872,
+          "peak_physical_footprint_bytes": 33751026280,
+          "seconds": 156.27594029166357,
+          "step": 1
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 1447,
+            "compilations": 553,
+            "compilationSeconds": 112.3322811249891,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 19.200739875159343,
+            "finalCommandBufferGPUSeconds": 8.2218299999804,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 1.8432808748912066,
+            "peakCheckpointBytes": 21374187008,
+            "recomputedStages": 214,
+            "stages": 1447,
+            "waitSeconds": 50.50147508317605
+          },
+          "loss": 5.167387008666992,
+          "metal_allocated_bytes": 5668306944,
+          "peak_physical_footprint_bytes": 34601601664,
+          "seconds": 32.96260670833726,
+          "step": 2
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 2190,
+            "compilations": 553,
+            "compilationSeconds": 112.3322811249891,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 29.115190125266963,
+            "finalCommandBufferGPUSeconds": 12.42104304174427,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 2.815299666413921,
+            "peakCheckpointBytes": 21374187008,
+            "recomputedStages": 321,
+            "stages": 2190,
+            "waitSeconds": 76.48977066648513
+          },
+          "loss": 5.162982940673828,
+          "metal_allocated_bytes": 5668306944,
+          "peak_physical_footprint_bytes": 34609039976,
+          "seconds": 37.490781708336726,
+          "step": 3
+        }
+      ],
+      "rank": 8,
+      "scope": "map-decoder",
+      "size": 1024,
+      "source_log": "out/training-throughput-audit/fine-rank8-1024.json.log",
+      "selected_benchmark_test_passed": true,
+      "selected_benchmark_test_seconds": 227.925,
+      "qualification_note": "A completed synthetic throughput test; does not establish numerical/resource qualification, material quality or a final default."
+    },
+    "rrdb-output-rank8-1024": {
+      "source_report": "out/training-throughput-audit/rrdb-output-rank8-1024.json",
+      "alpha": 8,
+      "base_sha256": "3f25b03e950c6199b53a3e1581296831e71555e1928ad209232b757f75153b7d",
+      "coalesce_active_blocks": false,
+      "coalesce_rrdb_blocks": true,
+      "observations": [
+        {
+          "cumulative_execution": {
+            "commandBuffers": 100,
+            "compilations": 100,
+            "compilationSeconds": 33.51659129168547,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 7.302612708299421,
+            "finalCommandBufferGPUSeconds": 0.21475141668634024,
+            "maximumInFlightStages": 1,
+            "packageLoadSeconds": 0.1332086666370742,
+            "peakCheckpointBytes": 2281701376,
+            "recomputedStages": 0,
+            "stages": 100,
+            "waitSeconds": 11.255164874979528
+          },
+          "loss": 5.1684699058532715,
+          "metal_allocated_bytes": 3990061056,
+          "peak_physical_footprint_bytes": 19389254296,
+          "seconds": 53.99854033333395,
+          "step": 1
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 137,
+            "compilations": 100,
+            "compilationSeconds": 33.51659129168547,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 11.35142599997198,
+            "finalCommandBufferGPUSeconds": 0.24289712501922622,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 0.2016651666490361,
+            "peakCheckpointBytes": 2281701376,
+            "recomputedStages": 0,
+            "stages": 137,
+            "waitSeconds": 18.308608958330296
+          },
+          "loss": 5.16743803024292,
+          "metal_allocated_bytes": 3990061056,
+          "peak_physical_footprint_bytes": 20217072304,
+          "seconds": 11.394165833335137,
+          "step": 2
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 237,
+            "compilations": 100,
+            "compilationSeconds": 33.51659129168547,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 18.07302637497196,
+            "finalCommandBufferGPUSeconds": 0.454298583259515,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 0.39814104166725883,
+            "peakCheckpointBytes": 2281701376,
+            "recomputedStages": 0,
+            "stages": 237,
+            "waitSeconds": 29.267351083319227
+          },
+          "loss": 5.163046360015869,
+          "metal_allocated_bytes": 4958945280,
+          "peak_physical_footprint_bytes": 21061323440,
+          "seconds": 18.345183708333934,
+          "step": 3
+        }
+      ],
+      "rank": 8,
+      "scope": "final-map",
+      "size": 1024,
+      "source_log": "out/training-throughput-audit/rrdb-output-rank8-1024.json.log",
+      "selected_benchmark_test_passed": true,
+      "selected_benchmark_test_seconds": 85.137,
+      "qualification_note": "A completed synthetic throughput test; does not establish numerical/resource qualification, material quality or a final default."
+    },
+    "adaptive-rank8-512": {
+      "source_report": "out/training-throughput-audit/adaptive-rank8-512.json",
+      "alpha": 8,
+      "base_sha256": "3f25b03e950c6199b53a3e1581296831e71555e1928ad209232b757f75153b7d",
+      "coalesce_active_blocks": true,
+      "observations": [
+        {
+          "cumulative_execution": {
+            "commandBuffers": 212,
+            "compilations": 198,
+            "compilationSeconds": 42.65188125001441,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 3.5204091249470366,
+            "finalCommandBufferGPUSeconds": 0.3199299166954006,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 0.2626990833086893,
+            "peakCheckpointBytes": 3632267264,
+            "recomputedStages": 0,
+            "stages": 212,
+            "waitSeconds": 3.8999396250073914
+          },
+          "loss": 5.184401988983154,
+          "metal_allocated_bytes": 2101248000,
+          "peak_physical_footprint_bytes": 9700756072,
+          "seconds": 53.383393791664275,
+          "step": 1
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 385,
+            "compilations": 198,
+            "compilationSeconds": 42.65188125001441,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 5.605480249905668,
+            "finalCommandBufferGPUSeconds": 0.562936750066001,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 0.4951459999574581,
+            "peakCheckpointBytes": 3632267264,
+            "recomputedStages": 0,
+            "stages": 385,
+            "waitSeconds": 6.293374583299737
+          },
+          "loss": 5.184272766113281,
+          "metal_allocated_bytes": 2539552768,
+          "peak_physical_footprint_bytes": 10565814936,
+          "seconds": 4.937150125006156,
+          "step": 2
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 597,
+            "compilations": 198,
+            "compilationSeconds": 42.65188125001441,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 8.193145749930409,
+            "finalCommandBufferGPUSeconds": 0.8803232499703881,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 0.7807895833102521,
+            "peakCheckpointBytes": 3632267264,
+            "recomputedStages": 0,
+            "stages": 597,
+            "waitSeconds": 8.862659624974185
+          },
+          "loss": 5.189213275909424,
+          "metal_allocated_bytes": 3093200896,
+          "peak_physical_footprint_bytes": 11078191768,
+          "seconds": 5.70648391667055,
+          "step": 3
+        }
+      ],
+      "rank": 8,
+      "scope": "map-decoder",
+      "size": 512,
+      "source_log": "out/training-throughput-audit/adaptive-rank8-512.json.log",
+      "selected_benchmark_test_passed": true,
+      "selected_benchmark_test_seconds": 65.254,
+      "source_provenance": "out/training-throughput-audit/adaptive-source-sha256.json",
+      "qualification_note": "Current default adaptive active grouping with resolved workspace headroom and isolated active stages, full Float32, RRDB experiment removed. Synthetic engine update timing, not end-to-end dataset timing or material-quality evidence."
+    },
+    "adaptive-rank8-1024": {
+      "source_report": "out/training-throughput-audit/adaptive-rank8-1024.json",
+      "alpha": 8,
+      "base_sha256": "3f25b03e950c6199b53a3e1581296831e71555e1928ad209232b757f75153b7d",
+      "coalesce_active_blocks": true,
+      "observations": [
+        {
+          "cumulative_execution": {
+            "commandBuffers": 222,
+            "compilations": 198,
+            "compilationSeconds": 65.6260565833436,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 10.987876374994812,
+            "finalCommandBufferGPUSeconds": 0.3248862499676761,
+            "maximumInFlightStages": 1,
+            "packageLoadSeconds": 0.29628616666741436,
+            "peakCheckpointBytes": 8522825728,
+            "recomputedStages": 10,
+            "stages": 222,
+            "waitSeconds": 17.151083541575645
+          },
+          "loss": 5.1684699058532715,
+          "metal_allocated_bytes": 5525831680,
+          "peak_physical_footprint_bytes": 32745949776,
+          "seconds": 97.23225270833791,
+          "step": 1
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 405,
+            "compilations": 198,
+            "compilationSeconds": 65.6260565833436,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 19.57190058325068,
+            "finalCommandBufferGPUSeconds": 0.5158207499698619,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 0.586951583303744,
+            "peakCheckpointBytes": 8522825728,
+            "recomputedStages": 20,
+            "stages": 405,
+            "waitSeconds": 31.295607499938342
+          },
+          "loss": 5.167387008666992,
+          "metal_allocated_bytes": 8126300160,
+          "peak_physical_footprint_bytes": 33125649024,
+          "seconds": 23.359421666660637,
+          "step": 2
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 627,
+            "compilations": 198,
+            "compilationSeconds": 65.6260565833436,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 30.20716187495418,
+            "finalCommandBufferGPUSeconds": 0.8362783332559047,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 0.9537527915963437,
+            "peakCheckpointBytes": 8522825728,
+            "recomputedStages": 30,
+            "stages": 627,
+            "waitSeconds": 47.82901104161283
+          },
+          "loss": 5.162982940673828,
+          "metal_allocated_bytes": 8126300160,
+          "peak_physical_footprint_bytes": 33125649024,
+          "seconds": 27.92494949999673,
+          "step": 3
+        }
+      ],
+      "rank": 8,
+      "scope": "map-decoder",
+      "size": 1024,
+      "source_log": "out/training-throughput-audit/adaptive-rank8-1024.json.log",
+      "selected_benchmark_test_passed": true,
+      "selected_benchmark_test_seconds": 149.799,
+      "source_provenance": "out/training-throughput-audit/adaptive-source-sha256.json",
+      "qualification_note": "Current default adaptive active grouping with resolved workspace headroom and isolated active stages, full Float32, RRDB experiment removed. Synthetic engine update timing, not end-to-end dataset timing or material-quality evidence."
+    },
+    "adaptive-output-rank8-1024": {
+      "source_report": "out/training-throughput-audit/adaptive-output-rank8-1024.json",
+      "alpha": 8,
+      "base_sha256": "3f25b03e950c6199b53a3e1581296831e71555e1928ad209232b757f75153b7d",
+      "coalesce_active_blocks": true,
+      "observations": [
+        {
+          "cumulative_execution": {
+            "commandBuffers": 184,
+            "compilations": 172,
+            "compilationSeconds": 52.77155766663054,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 7.0163869583338965,
+            "finalCommandBufferGPUSeconds": 0.21667937501479173,
+            "maximumInFlightStages": 1,
+            "packageLoadSeconds": 0.23879258334636688,
+            "peakCheckpointBytes": 7113539584,
+            "recomputedStages": 0,
+            "stages": 184,
+            "waitSeconds": 11.763080708333291
+          },
+          "loss": 5.1684699058532715,
+          "metal_allocated_bytes": 3179511808,
+          "peak_physical_footprint_bytes": 16823503440,
+          "seconds": 73.48250991666282,
+          "step": 1
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 305,
+            "compilations": 172,
+            "compilationSeconds": 52.77155766663054,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 10.703854333303752,
+            "finalCommandBufferGPUSeconds": 0.2455605416544131,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 0.41680987495783484,
+            "peakCheckpointBytes": 7113539584,
+            "recomputedStages": 0,
+            "stages": 305,
+            "waitSeconds": 19.120302166622423
+          },
+          "loss": 5.16743803024292,
+          "metal_allocated_bytes": 3179511808,
+          "peak_physical_footprint_bytes": 17110960720,
+          "seconds": 11.364776833332144,
+          "step": 2
+        },
+        {
+          "cumulative_execution": {
+            "commandBuffers": 489,
+            "compilations": 172,
+            "compilationSeconds": 52.77155766663054,
+            "diskPackageCacheHits": 0,
+            "executionSeconds": 17.580049375006638,
+            "finalCommandBufferGPUSeconds": 0.4570941666024737,
+            "maximumInFlightStages": 2,
+            "packageLoadSeconds": 0.7062328333122423,
+            "peakCheckpointBytes": 7113539584,
+            "recomputedStages": 0,
+            "stages": 489,
+            "waitSeconds": 30.34149266658642
+          },
+          "loss": 5.163046360015869,
+          "metal_allocated_bytes": 3345186816,
+          "peak_physical_footprint_bytes": 17217030712,
+          "seconds": 18.608300125000824,
+          "step": 3
+        }
+      ],
+      "rank": 8,
+      "scope": "final-map",
+      "size": 1024,
+      "source_log": "out/training-throughput-audit/adaptive-output-rank8-1024.json.log",
+      "selected_benchmark_test_passed": true,
+      "selected_benchmark_test_seconds": 104.675,
+      "source_provenance": "out/training-throughput-audit/adaptive-source-sha256.json",
+      "qualification_note": "Current default adaptive active grouping with resolved workspace headroom and isolated active stages, full Float32, RRDB experiment removed. Synthetic engine update timing, not end-to-end dataset timing or material-quality evidence."
+    }
+  },
+  "integrated_suite_before_orphan_cleanup": {
+    "executed_tests": 357,
+    "skipped_tests": 4,
+    "failures": 0,
+    "seconds": 243.97
+  },
+  "final_cache_recovery_tests": {
+    "executed_tests": 6,
+    "failures": 0,
+    "seconds": 0.047
+  },
+  "recovery_qualified_source_sha256": {
+    "src/TextureStudio/Services/NativeMaterialModel.swift": "cd0ca3452a28b10423e687d3aa8ea583fab20bdc87beeb2d86ce3a168cb4367c",
+    "src/TextureStudio/Services/NativeGraphCodeCache.swift": "98e1483c1150848a7a2e8ffa8a4369c4fb7902065aa8540e18c68fd4c4d482c2",
+    "src/TextureStudio/Services/NativeMaterialTrainer.swift": "b61ee6c96796d9028da869dc4b010c89c4090b9e9c729a664bfd70d5774c2887",
+    "src/TextureStudio/Tests/NativeMaterialModelTests.swift": "3ab4884c0cbc7258f941923232803f6d2989ae026ce14b855f76701d69a9012b",
+    "src/TextureStudio/Tests/NativeGraphCodeCacheTests.swift": "5ab24f9991eb52cba9200d962a0176965ca755d54c3a50dab899f7f710944828",
+    "script/benchmark_native_training.sh": "9b93ccba59e955e81dc5b8300b26eb15f9f787b32084148ef1e0dc5c600647d9",
+    "build/TrainingThroughputFinal/Build/Products/Release/Texture Studio.app/Contents/MacOS/Texture Studio": "a1d767ece75b68cbc883d505e22829984097bb8e5c34a4a89717ede1921e5632"
+  },
+  "recovery_qualified_installed_binaries": [
+    {
+      "app": "/Applications/Texture Studio.app",
+      "sha256": "70fafd8d84dfc1921a046c33da1cdbba95ee4ef1a01f1472399a618b75497a5c",
+      "built_sha256": "70fafd8d84dfc1921a046c33da1cdbba95ee4ef1a01f1472399a618b75497a5c",
+      "signature_verified": true
+    },
+    {
+      "app": "/Applications/Texture Studio.app/Contents/Applications/Checkpoint Compare.app",
+      "sha256": "fabc00c2b4369adfe5923325d3db0b35ea3e863d4333fc00027c582331cda3f9",
+      "built_sha256": "fabc00c2b4369adfe5923325d3db0b35ea3e863d4333fc00027c582331cda3f9",
+      "signature_verified": true
+    },
+    {
+      "app": "/Applications/Texture Studio.app/Contents/Applications/Material Dataset.app",
+      "sha256": "709103e797eb2cbd6a6373dc6358fc9f2139277b26bc92bbf586dc69d40ffa27",
+      "built_sha256": "709103e797eb2cbd6a6373dc6358fc9f2139277b26bc92bbf586dc69d40ffa27",
+      "signature_verified": true
+    },
+    {
+      "app": "/Applications/Texture Studio.app/Contents/Applications/Material Review.app",
+      "sha256": "d475383c206318b077db89bed8dfa6cd85f9169601f41f9b2248217aaceab5ed",
+      "built_sha256": "d475383c206318b077db89bed8dfa6cd85f9169601f41f9b2248217aaceab5ed",
+      "signature_verified": true
+    },
+    {
+      "app": "/Applications/Texture Studio.app/Contents/Applications/Material Trainer.app",
+      "sha256": "6e5a0196422e380adf53b050e7e6b74ec68e005eb78edc5c057aac85b181f28b",
+      "built_sha256": "6e5a0196422e380adf53b050e7e6b74ec68e005eb78edc5c057aac85b181f28b",
+      "signature_verified": true
+    }
+  ],
+  "recovery_qualified_installed_smoke_exit_code": 0,
+  "experimental_coarse_rank8_binary_sha256": "16b99272194a0eb9ab02b553357ff46a736dd174393917e533040587fbeb4922",
+  "larger_grid_attempts": [
+    {
+      "policy": "24GiB checkpoint pool",
+      "completed_updates": 0,
+      "status": "stopped for memory regression",
+      "peak_physical_footprint_bytes": 57407179368,
+      "peak_sampled_metal_bytes": 54785032192,
+      "peak_system_swap_GiB": 2.54
+    },
+    {
+      "policy": "6GiB checkpoint pool and drain before cold compilation",
+      "completed_updates": 0,
+      "status": "stopped at user request due to latency; memory behavior not accepted as qualified",
+      "last_elapsed_seconds": 589.518,
+      "last_reverse_stage_completed": 119,
+      "reverse_stage_total": 249,
+      "peak_physical_footprint_GiB": 47.9305,
+      "peak_sampled_metal_GiB": 45.34,
+      "initial_system_swap_GiB": 1.19,
+      "last_system_swap_GiB": 1.16
+    }
+  ],
+  "experimental_kernel_tests": {
+    "executed_tests": 3,
+    "failures": 1,
+    "coarse_Float32_two_step_fixture_passed": true,
+    "fast_transform_fine64_passed": true,
+    "fast_transform_coarse128_passed": false,
+    "coarse128_max_learned_delta_error": 7.029623e-05,
+    "coarse128_allowed_learned_delta_error": 8.989049e-06,
+    "varied_Float32_control": "Existing fine128staged control also failed with the identical7.0217066e-5 learned-delta error. At the worst coordinate monolithic/staged gradients were-8.3628e-9/1.81917e-8 nearAdam epsilon1e-8; this rejects strict per-coordinate update equivalence, and does not attribute the deviation to coalescing or FP16.",
+    "adopted_fast_transforms": false,
+    "fast_transform_removed": true
+  },
+  "completed_rank8_comparisons": {
+    "fine_vs_active_coalescing": {
+      "baseline_report": "out/training-throughput-audit/fine-rank8-1024.json",
+      "candidate_report": "out/training-throughput-audit/coarse-rank8-1024.json",
+      "matched_settings": {
+        "size": 1024,
+        "scope": "map-decoder",
+        "rank": 8,
+        "alpha": 8,
+        "precision": "Float32"
+      },
+      "baseline_seconds": [
+        156.27594029166357,
+        32.96260670833726,
+        37.490781708336726
+      ],
+      "candidate_seconds": [
+        106.313254458335,
+        23.531695083329396,
+        28.364049000003433
+      ],
+      "same_input_warm_reduction_percent": 28.610939991655748,
+      "changed_input_warm_reduction_percent": 24.343938142809662,
+      "printed_losses_match_all_three_updates": true,
+      "changed_policies": [
+        "Active-block stage coalescing",
+        "Default checkpoint cap changes from 24 GiB to 8 GiB"
+      ],
+      "historical_report_note": "The raw fast_convolution_transforms:false field remains preserved in these reports; the arithmetic experiment has since been removed.",
+      "limitation": "Individual matched-rank runs do not isolate stage cuts from checkpoint policy or establish material quality; they precede the later shared-headroom and active-stage-isolation candidate."
+    },
+    "rrdb_output_branch": {
+      "candidate_report": "out/training-throughput-audit/rrdb-output-rank8-1024.json",
+      "rank": 8,
+      "alpha": 8,
+      "coalesce_active_blocks": false,
+      "coalesce_rrdb_blocks": true,
+      "same_input_warm_seconds": 11.394165833335137,
+      "changed_input_warm_seconds": 18.345183708333934,
+      "comparison_report": "out/training-throughput-audit/final-output-1024.json",
+      "comparison_rank": 64,
+      "comparison_alpha": 16,
+      "limitation": "The earlier fine output-branch run changes rank and alpha; similar warm timings are not a matched attribution of RRDB coalescing. This candidate does not achieve a few-second 1K update.",
+      "changed_input_time_reduction_vs_different_rank_percent": 1.39470604701053,
+      "rejection_note": "Only a small observed timing difference against a different-rank fine run, followed by four broader-scope learned-update bound failures against the matched existing fine engine; RRDB experiment rejected; implementation and flag removed."
+    },
+    "fine_vs_current_adaptive": {
+      "baseline_report": "out/training-throughput-audit/fine-rank8-1024.json",
+      "candidate_report": "out/training-throughput-audit/adaptive-rank8-1024.json",
+      "matched_settings": {
+        "size": 1024,
+        "scope": "map-decoder",
+        "rank": 8,
+        "alpha": 8,
+        "precision": "Float32"
+      },
+      "baseline_seconds": [
+        156.27594029166357,
+        32.96260670833726,
+        37.490781708336726
+      ],
+      "candidate_seconds": [
+        97.23225270833791,
+        23.359421666660637,
+        27.92494949999673
+      ],
+      "same_input_warm_reduction_percent": 29.13357285923531,
+      "changed_input_warm_reduction_percent": 25.515158053407216,
+      "printed_losses_match_all_three_updates": true,
+      "changed_policies": [
+        "Adaptive active-block stage coalescing with shared headroom and stage isolation",
+        "Default checkpoint cap changes from 24 GiB to 8 GiB"
+      ],
+      "limitation": "Individual runs change both stage cuts and checkpoint policy; they do not isolate coalescing or establish material quality. Changed-input 1K updates still exceed ten seconds."
+    }
+  },
+  "candidate_coarse_stage_policy": {
+    "status": "Current default adaptive active grouping passed the complete Release suite and the real 512 map-decoder rank-8 production execution/resource/export check. Normal package built, installed and verified. Material-quality comparison unmeasured; 2K remains unqualified.",
+    "precision": "Float32",
+    "maximum_grid_dimension": 1024,
+    "checkpoint_cap_bytes": 8589934592,
+    "workspace_budget": "Sequential saturated subtraction from capacity of min(checkpointBudget, capacity/2), min(2 GiB, capacity/16), and estimatedWorkingBytes(model,size).",
+    "active_block_admission": "72 times input bytes must fit the resolved workspace budget; frozen forward-block admission remains unchanged.",
+    "graph_owner_consistency": "The same resolved UInt64 budget is used by initial, rebuilt and disposable compiler owners.",
+    "compiled_code_identity": "Includes the active execution variant and resolved workspace budget when active grouping is enabled, because explicit checkpoint budgets can change cuts.",
+    "isolated_stages": [
+      "Coalesced active blocks"
+    ],
+    "stream_isolation": "Drain before and after each marked active forward/reverse stage, including replay, errors and cancellation; submission storage remains owned until GPU completion.",
+    "measurement_note": "The adaptive-rank8-512, adaptive-rank8-1024 and adaptive-output-rank8-1024 reports use this final source. Earlier coarse/RRDB reports predate shared-headroom and active-stage isolation.",
+    "memory_limitation": "Workspace formulas are conservative admission estimates, not guarantees of actual backend peak allocation.",
+    "remaining_candidate": "Adaptive active-block grouping is enabled through 1K subject to memory admission; explicit false override or TEXTURE_STUDIO_COALESCE_ACTIVE_BLOCKS=0 retains fine cuts. Saved grid/scope/rank/alpha are preserved.",
+    "historical_rejected_rrdb_admission": "Workspace estimate must fit min(24 GiB, capacity/2, resolved workspace budget).",
+    "rrdb_experiment_status": "Rejected after broader-scope optimizer regression; implementation and flag removed.",
+    "historical_rrdb_isolation": "The rejected RRDB experiment used the same drain-before/drain-after scheduling.",
+    "default_enabled": true,
+    "remaining_unmeasured": [
+      "Held-out material-quality comparison",
+      "2K production qualification"
+    ]
+  },
+  "experimental_coarse_controls": {
+    "source_log": "out/training-throughput-audit/final-coarse-controls.log",
+    "executed_tests": 4,
+    "failed_tests": 1,
+    "assertion_failures": 4,
+    "unexpected_failures": 0,
+    "active_block_varied128_both_scopes_two_steps": {
+      "passed": true,
+      "seconds": 45.446,
+      "baseline": "Existing fine-stage engine, identical checkpoint budgets and explicit policy flags",
+      "compared": [
+        "Output and loss",
+        "All adapter gradients",
+        "All Adam moments",
+        "All factors and learned changes"
+      ]
+    },
+    "pure_workspace_policy_tests": {
+      "executed_tests": 2,
+      "failures": 0,
+      "seconds": 0.001
+    },
+    "rrdb_varied128_two_steps": {
+      "output_scope_passed": true,
+      "map_decoder_scope_passed": false,
+      "seconds": 35.632,
+      "failed_learned_delta_bounds": [
+        {
+          "case": "map-decoder, 128, coarseActive=false, coarseRRDB=true, step 2",
+          "parameter": "gen.m_dec_3.m_up1.0.up.3.lora_A",
+          "coordinate": 272,
+          "maximum_delta_error": 1.5869736671447754e-05,
+          "delta_error_bound": 8.976918252301402e-06,
+          "adam_epsilon": 9.99999993922529e-09,
+          "learning_rate": 9.999999747378752e-05,
+          "fine_baseline_gradient": 3.2802017813082784e-07,
+          "rrdb_candidate_gradient": 2.2425592760555446e-07,
+          "fine_baseline_adam_direction": -0.10715445657073266,
+          "rrdb_candidate_adam_direction": -0.2658511071212087
+        },
+        {
+          "case": "map-decoder, 128, coarseActive=false, coarseRRDB=true, step 2",
+          "parameter": "gen.m_dec_3.m_up1.1.conv1_1.lora_A",
+          "coordinate": 5,
+          "maximum_delta_error": 1.3470649719238281e-05,
+          "delta_error_bound": 8.759430784266442e-06,
+          "adam_epsilon": 9.99999993922529e-09,
+          "learning_rate": 9.999999747378752e-05,
+          "fine_baseline_gradient": -5.999531538236624e-08,
+          "rrdb_candidate_gradient": -3.306209350739664e-08,
+          "fine_baseline_adam_direction": 0.31752836884544133,
+          "rrdb_candidate_adam_direction": 0.4522470566726635
+        },
+        {
+          "case": "map-decoder, 128, coarseActive=false, coarseRRDB=true, step 2",
+          "parameter": "gen.m_dec_3.m_up2.0.up.1.lora_A",
+          "coordinate": 679,
+          "maximum_delta_error": 6.919074803590775e-05,
+          "delta_error_bound": 8.988443369162269e-06,
+          "adam_epsilon": 9.99999993922529e-09,
+          "learning_rate": 9.999999747378752e-05,
+          "fine_baseline_gradient": 1.819171302486211e-08,
+          "rrdb_candidate_gradient": -7.745256880298257e-09,
+          "fine_baseline_adam_direction": 0.2758124399597086,
+          "rrdb_candidate_adam_direction": -0.4162191263428802
+        },
+        {
+          "case": "map-decoder, 128, coarseActive=false, coarseRRDB=true, step 2",
+          "parameter": "gen.m_dec_3.m_up3.0.up.3.lora_A",
+          "coordinate": 114,
+          "maximum_delta_error": 2.0090490579605103e-05,
+          "delta_error_bound": 8.978431651485153e-06,
+          "adam_epsilon": 9.99999993922529e-09,
+          "learning_rate": 9.999999747378752e-05,
+          "fine_baseline_gradient": 1.507942215539515e-09,
+          "rrdb_candidate_gradient": 9.552422852721065e-09,
+          "fine_baseline_adam_direction": 0.16813989839180576,
+          "rrdb_candidate_adam_direction": 0.3690182479138378
+        }
+      ],
+      "adopted": false,
+      "removal_status": "Implementation and flag removed"
+    },
+    "interpretation": "RRDB adds a declared-bound optimizer regression versus the existing fine engine; active grouping passed this control. This does not identify a backend arithmetic cause or attribute the earlier separate fast-transform failure to reduced precision.",
+    "pending": [],
+    "qualification_followup": "The current source subsequently passed adaptive-final-suite.log, current-profile synthetic timings, and the real 512 production check; the normal package built, installed and verified. Quality remains unmeasured."
+  },
+  "adaptive_source_provenance": {
+    "source_report": "out/training-throughput-audit/adaptive-source-sha256.json",
+    "source_sha256": {
+      "src/TextureStudio/Services/NativeMaterialModel.swift": "6341ea5e771e58605ca6b039f9146684040bf56a91a7a196661040249c40de82",
+      "src/TextureStudio/Services/NativeGraphCodeCache.swift": "98e1483c1150848a7a2e8ffa8a4369c4fb7902065aa8540e18c68fd4c4d482c2",
+      "src/TextureStudio/Services/NativeMaterialTrainer.swift": "b61ee6c96796d9028da869dc4b010c89c4090b9e9c729a664bfd70d5774c2887",
+      "src/TextureStudio/Tests/NativeMaterialModelTests.swift": "45fa8d97708c516bcf19e6fd3bec4fdde403474a43aedc84ab66d6afcbb903b4",
+      "src/TextureStudio/Tests/NativeGraphCodeCacheTests.swift": "5ab24f9991eb52cba9200d962a0176965ca755d54c3a50dab899f7f710944828",
+      "src/TextureStudio/Tests/NativeGraphStageCoalescingTests.swift": "4a327d0839f65f6c11cc224a116927728e4901aab8521230e4df959ee984a2d5",
+      "script/benchmark_native_training.sh": "2d89ee2763905920ad833c49e5e7d0a22eff9e16dbfb0466842d9492b8374011"
+    },
+    "release_test_host_sha256": "9a416a7c7d25509fe1f7ed91b02819f37f98963c41560e3ff67173f263b2b47a",
+    "profile": "adaptive active blocks through1K, isolated full-block workspaces, full Float32, RRDB experiment removed"
+  },
+  "adaptive_final_suite": {
+    "source_log": "out/training-throughput-audit/adaptive-final-suite.log",
+    "executed_tests": 363,
+    "skipped_tests": 4,
+    "failures": 0,
+    "unexpected_failures": 0,
+    "seconds": 454.133,
+    "varied_height_128_both_scopes_two_steps": {
+      "passed": true,
+      "seconds": 45.653
+    },
+    "varied_normal_roughness_128_both_scopes_two_steps": {
+      "passed": true,
+      "seconds": 92.265
+    },
+    "comparison": "Existing fine-stage engine, identical explicit checkpoint budgets, independently evolving production CPU Adam updates; outputs/loss, all gradients, factors, Adam moments and learned changes under unchanged bounds.",
+    "monolithic_all_factor_two_step_checks": {
+      "fine_passed": true,
+      "adaptive_passed": true,
+      "adaptive_seconds": 78.176,
+      "forced_replay_and_full_checkpoint_budgets": true
+    },
+    "pure_headroom_policy_tests": {
+      "executed_tests": 2,
+      "failures": 0
+    },
+    "limitation": "Covered numerical regression cases, not proof of material quality or every production shape."
+  },
+  "adaptive_gpu_observations": {
+    "source_report": "out/training-throughput-audit/adaptive-rank8-512.gpu.csv",
+    "scope": "Short system-wide IORegistry device-utilization samples including other applications; not Activity Monitor per-process GPU percentage or a full-run average.",
+    "groups": [
+      {
+        "completed_updates": 1,
+        "sample_count": 5,
+        "values_percent": [
+          73.0,
+          86.0,
+          94.0,
+          91.0,
+          89.0
+        ],
+        "mean_percent": 86.6
+      },
+      {
+        "completed_updates": 2,
+        "sample_count": 5,
+        "values_percent": [
+          90.0,
+          83.0,
+          92.0,
+          92.0,
+          90.0
+        ],
+        "mean_percent": 89.4
+      }
+    ]
+  },
+  "production_512_map_decoder_rank8": {
+    "source_report": "out/training-throughput-audit/production-512-map-decoder-r8/run-647ADCEB-0A4A-4A97-9A25-6E9A95AB8E97/training-512.json",
+    "source_log": "out/training-throughput-audit/production-512-map-decoder-r8/xcodebuild.log",
+    "source_provenance": "out/training-throughput-audit/adaptive-source-sha256.json",
+    "selected_test_passed": true,
+    "selected_test_seconds": 30.847,
+    "status": "completed",
+    "size": 512,
+    "scope": "map-decoder",
+    "rank": 8,
+    "alpha": 8,
+    "base_checkpoint": "/Users/andrewsmith/Library/Application Support/Texture Studio/Material Models/pbrnxt-base/pbrnxt_402236.pth",
+    "base_sha256": "3f25b03e950c6199b53a3e1581296831e71555e1928ad209232b757f75153b7d",
+    "completed_updates": 4,
+    "requested_updates": 4,
+    "elapsed_seconds": 29.840367875,
+    "max_minutes": 90,
+    "training_pair_count": 2,
+    "updates_per_map": 2,
+    "source_directory": "/opt/ipde/sources_mats/white_stucco_02",
+    "source_pairs": [
+      {
+        "input": "/opt/ipde/sources_mats/white_stucco_02/white_stucco_02_diff_2k.png",
+        "material_id": "white_stucco_02",
+        "target": "/opt/ipde/sources_mats/white_stucco_02/white_stucco_02_disp_2k.png"
+      },
+      {
+        "input": "/opt/ipde/sources_mats/red_brick/red_brick_diff_2k.png",
+        "material_id": "red_brick",
+        "target": "/opt/ipde/sources_mats/red_brick/red_brick_disp_2k.png"
+      }
+    ],
+    "source_sha256": [
+      "c1d34a64fa62b613e62d24a81c20e9d1f612e555525a1476742fea6b98e563ac",
+      "1ff58140eb77ad6fd1350f30952eae6625a66041317e6c99ab64faf42d4ca82d",
+      "4b814528cb900a65e2a2600254a06326d2966a6188b325283fdf74891e7e1f04",
+      "733166c31b1b7ba4fc772247edf3527a83f20d4d14d2571ab1674f0dfd28e12a"
+    ],
+    "training_input_sha256": [
+      "d215d777c40e3a985b8f0b94e92fa3c14be37eb8f5a851517b52c3275fe45397",
+      "3f6a10cc451af6b9428e4af994dc3e862d07e374342b895bdc63b781b14032db"
+    ],
+    "measurement_scope": "Real learned base, exact native pixels, distinct real training materials in repeated shuffled passes and the first pair repeated for validation; numeric execution and resource regression, not material quality.",
+    "resource_measurement_scope": "RSS and physical-footprint peaks are process lifetime high-water marks; Metal peak is sampled for this run. Later sizes may include an earlier process peak.",
+    "resources": {
+      "benchmark_resource_abort_limit_bytes": 61847529062,
+      "benchmark_resource_abort_requested": false,
+      "current_metal_allocation_bytes": 1605402624,
+      "current_physical_footprint_bytes": 1766230128,
+      "current_resident_bytes": 949338112,
+      "initial_system_swap_used_bytes": 754778112,
+      "initial_volume_available_capacity_bytes": 48692248576,
+      "metal_recommended_working_set_bytes": 55662788608,
+      "metal_sample_interval_ms": 100,
+      "physical_memory_bytes": 68719476736,
+      "process_maximum_rss_bytes": 1878097920,
+      "process_peak_physical_footprint_bytes": 11184851488,
+      "sampled_peak_metal_allocation_bytes": 8588148736,
+      "storage_measurement_scope": "Swap is system-wide and available capacity is volume-wide. Deltas can include activity outside this training process.",
+      "system_swap_used_bytes": 754778112,
+      "system_swap_used_delta_bytes": 0,
+      "volume_available_capacity_bytes": 48665153536,
+      "volume_available_capacity_delta_bytes": -27095040,
+      "volume_measurement_path": "/opt/ipde/ipde/out/training-throughput-audit/production-512-map-decoder-r8/run-647ADCEB-0A4A-4A97-9A25-6E9A95AB8E97"
+    },
+    "selected_updates": [
+      {
+        "event": "update",
+        "step": 1,
+        "epoch": 1,
+        "sample_id": "train-white_stucco_02",
+        "native_dimensions": [
+          512,
+          512
+        ],
+        "learning_rate": 9.999999747378752e-06,
+        "gradient_norm": 0.276325426031427,
+        "value_l1": 0.10053561627864838,
+        "detail_l1": 0.048479948192834854,
+        "total": 0.2944554090499878,
+        "update_duration_seconds": 8.533406833,
+        "data_preparation_seconds": 0.00899175000085961,
+        "optimizer_seconds": 0.02599900000495836,
+        "cumulative_engine_statistics": {
+          "commandBuffers": 329,
+          "compilations": 0,
+          "compilationSeconds": 0,
+          "diskPackageCacheHits": 198,
+          "executionSeconds": 3.9951529165991815,
+          "finalCommandBufferGPUSeconds": 0.5382080832787324,
+          "maximumInFlightStages": 2,
+          "packageLoadSeconds": 0.3874456666671904,
+          "peakCheckpointBytes": 3632267264,
+          "recomputedStages": 0,
+          "stages": 329,
+          "waitSeconds": 2.906235041671607
+        }
+      },
+      {
+        "event": "update",
+        "step": 2,
+        "epoch": 1,
+        "sample_id": "train-red_brick",
+        "native_dimensions": [
+          512,
+          512
+        ],
+        "learning_rate": 9.999999747378752e-06,
+        "gradient_norm": 0.09222199876808544,
+        "value_l1": 0.17375153303146362,
+        "detail_l1": 0.02393946796655655,
+        "total": 0.2695094048976898,
+        "update_duration_seconds": 5.76239175,
+        "data_preparation_seconds": 0.009059416661330033,
+        "optimizer_seconds": 0.03427929167082766,
+        "cumulative_engine_statistics": {
+          "commandBuffers": 541,
+          "compilations": 0,
+          "compilationSeconds": 0,
+          "diskPackageCacheHits": 198,
+          "executionSeconds": 6.5910954583014245,
+          "finalCommandBufferGPUSeconds": 0.8548609166755341,
+          "maximumInFlightStages": 2,
+          "packageLoadSeconds": 0.6418631667474983,
+          "peakCheckpointBytes": 3632267264,
+          "recomputedStages": 0,
+          "stages": 541,
+          "waitSeconds": 5.438052916571905
+        }
+      },
+      {
+        "event": "update",
+        "step": 3,
+        "epoch": 2,
+        "sample_id": "train-white_stucco_02",
+        "native_dimensions": [
+          512,
+          512
+        ],
+        "learning_rate": 9.999999747378752e-06,
+        "gradient_norm": 0.27640615825345144,
+        "value_l1": 0.10025940835475922,
+        "detail_l1": 0.04847770556807518,
+        "total": 0.29417023062705994,
+        "update_duration_seconds": 5.006646917,
+        "data_preparation_seconds": 0.009040333330631256,
+        "optimizer_seconds": 0.033699374995194376,
+        "cumulative_engine_statistics": {
+          "commandBuffers": 714,
+          "compilations": 0,
+          "compilationSeconds": 0,
+          "diskPackageCacheHits": 198,
+          "executionSeconds": 8.719302541576326,
+          "finalCommandBufferGPUSeconds": 1.098279000048933,
+          "maximumInFlightStages": 2,
+          "packageLoadSeconds": 0.8487802917006775,
+          "peakCheckpointBytes": 3632267264,
+          "recomputedStages": 0,
+          "stages": 714,
+          "waitSeconds": 7.771074416588817
+        }
+      },
+      {
+        "event": "update",
+        "step": 4,
+        "epoch": 2,
+        "sample_id": "train-red_brick",
+        "native_dimensions": [
+          512,
+          512
+        ],
+        "learning_rate": 9.999999747378752e-06,
+        "gradient_norm": 0.09253984879150642,
+        "value_l1": 0.1737220287322998,
+        "detail_l1": 0.023936551064252853,
+        "total": 0.2694682478904724,
+        "update_duration_seconds": 4.934532792,
+        "data_preparation_seconds": 0.008889166660082992,
+        "optimizer_seconds": 0.03339474999665981,
+        "cumulative_engine_statistics": {
+          "commandBuffers": 887,
+          "compilations": 0,
+          "compilationSeconds": 0,
+          "diskPackageCacheHits": 198,
+          "executionSeconds": 10.777991874914733,
+          "finalCommandBufferGPUSeconds": 1.3412012500484707,
+          "maximumInFlightStages": 2,
+          "packageLoadSeconds": 1.0493813750654226,
+          "peakCheckpointBytes": 3632267264,
+          "recomputedStages": 0,
+          "stages": 887,
+          "waitSeconds": 10.12981624994427
+        }
+      }
+    ],
+    "run": {
+      "status": "completed",
+      "completed_updates": 4,
+      "requested_updates": 4,
+      "sample_evaluations": 4,
+      "updates_per_map": 2,
+      "training_performed": true,
+      "native_dimensions": [
+        512,
+        512
+      ],
+      "image_padding": false,
+      "image_resizing": false,
+      "runtime": "Apple MPSGraph Float32",
+      "dataset_manifest_sha256": "57f9a4ea76f429d914a6e0a0e40adbaab8aca2ae4806871cdcb892e66d4c2ddc",
+      "elapsed_training_seconds": 28.592322125,
+      "checkpoint_path": "/opt/ipde/ipde/out/training-throughput-audit/production-512-map-decoder-r8/run-647ADCEB-0A4A-4A97-9A25-6E9A95AB8E97/trained-512/export/adapter.safetensors",
+      "last_checkpoint": "/opt/ipde/ipde/out/training-throughput-audit/production-512-map-decoder-r8/run-647ADCEB-0A4A-4A97-9A25-6E9A95AB8E97/trained-512/checkpoint-step-00000004.safetensors",
+      "package_path": "/opt/ipde/ipde/out/training-throughput-audit/production-512-map-decoder-r8/run-647ADCEB-0A4A-4A97-9A25-6E9A95AB8E97/trained-512/export",
+      "baseline_validation": {
+        "context": "baseline",
+        "event": "validation",
+        "mae": 0.10053561627864838,
+        "pool_count": 1,
+        "reference": "Teacher/source agreement, not measured material accuracy",
+        "sample_count": 1,
+        "samples": [
+          {
+            "mae": 0.10053561627864838,
+            "sample_id": "validation"
+          }
+        ],
+        "scope": "full",
+        "status": "checked",
+        "step": 0
+      },
+      "final_validation": {
+        "context": "final",
+        "event": "validation",
+        "mae": 0.10000501573085785,
+        "pool_count": 1,
+        "reference": "Teacher/source agreement, not measured material accuracy",
+        "sample_count": 1,
+        "samples": [
+          {
+            "mae": 0.10000501573085785,
+            "sample_id": "validation"
+          }
+        ],
+        "scope": "full",
+        "status": "checked",
+        "step": 4
+      }
+    },
+    "passed_assertions": [
+      "All four requested updates completed; both real materials trained twice",
+      "Native 512 dimensions with no image resizing or padding",
+      "Original source-file hashes unchanged",
+      "Complete selected adapter factor set preserved; early branch, RRDB, final output and decoder upsampling factors changed",
+      "Exported adapter package verified and scope/rank/alpha/grid/step/base metadata matched",
+      "Physical-footprint and sampled-Metal resource guards not triggered"
+    ],
+    "native_pixel_provenance": "NativePNG central crops from original 16-bit maps without resampling. Source hashes are ordered input,target for each source pair; training_input_sha256 is ordered by source pair.",
+    "cache_measurement_note": "All selected updates report cumulative totals of 198 disk-package hits and zero compilations, not 198 new hits per update. This fresh process reuses compiled code created by an earlier process.",
+    "quality_limitation": "Baseline and final validation repeat the training white_stucco_02 pair; agreement MAE is a numeric execution diagnostic, not held-out material quality or generalization."
+  },
+  "adaptive_normal_package": {
+    "source_report": "out/training-throughput-audit/adaptive-package-validation.json",
+    "source_log": "out/training-throughput-audit/adaptive-package.log",
+    "binaries_report": "out/training-throughput-audit/adaptive-built-binaries.json",
+    "installation_log": "out/training-throughput-audit/adaptive-install.log",
+    "installed_binaries_report": "out/training-throughput-audit/adaptive-installed-binaries.json",
+    "installed_smoke_log": "out/training-throughput-audit/adaptive-installed-smoke.log",
+    "bundles": [
+      {
+        "app": "/opt/ipde/ipde/build/TextureStudio/Build/Products/Release/Texture Studio.app",
+        "sha256": "1a0255667d6d93eb2a13ad91e62d6ec730b7d8d48c0d85af4018d2712432d249",
+        "signature_verified": true,
+        "hardened_runtime": true,
+        "version": "0.9.13",
+        "build": "107"
+      },
+      {
+        "app": "/opt/ipde/ipde/build/TextureStudio/Build/Products/Release/Texture Studio.app/Contents/Applications/Checkpoint Compare.app",
+        "sha256": "af70df065cb48c289221b9826dbceaf259c9b9ed22857024050cc80d7e0956a2",
+        "signature_verified": true,
+        "hardened_runtime": true,
+        "version": "0.9.13",
+        "build": "107"
+      },
+      {
+        "app": "/opt/ipde/ipde/build/TextureStudio/Build/Products/Release/Texture Studio.app/Contents/Applications/Material Dataset.app",
+        "sha256": "d0d81f1898f60213e2453207bd475c83c62f57a392b616c3f2301d3a8d1c215e",
+        "signature_verified": true,
+        "hardened_runtime": true,
+        "version": "0.9.13",
+        "build": "107"
+      },
+      {
+        "app": "/opt/ipde/ipde/build/TextureStudio/Build/Products/Release/Texture Studio.app/Contents/Applications/Material Review.app",
+        "sha256": "2fdb12e8bf48bc11fa17ee3152428eb8ceae71a0e56a8c69e4e8b8dab8de8165",
+        "signature_verified": true,
+        "hardened_runtime": true,
+        "version": "0.9.13",
+        "build": "107"
+      },
+      {
+        "app": "/opt/ipde/ipde/build/TextureStudio/Build/Products/Release/Texture Studio.app/Contents/Applications/Material Trainer.app",
+        "sha256": "8dacd9111325550a59acbd55ed00ea275fc0ee224a1a768de3e14a90a13c54ea",
+        "signature_verified": true,
+        "hardened_runtime": true,
+        "version": "0.9.13",
+        "build": "107"
+      }
+    ],
+    "package_path": "/opt/ipde/ipde/dist/Texture-Studio-macos-arm64.zip",
+    "package_sha256": "248b6157b1ea36cc09c4ebe7906089dc94ddfae3b86e18fe0452906d95fbec58",
+    "source_snapshot_matches": true,
+    "test_bundles": 0,
+    "built_smoke_exit_code": 0,
+    "installation_status": "installed",
+    "installed_bundles": [
+      {
+        "app": "/Applications/Texture Studio.app",
+        "sha256": "1a0255667d6d93eb2a13ad91e62d6ec730b7d8d48c0d85af4018d2712432d249",
+        "signature_verified": true,
+        "hardened_runtime": true,
+        "version": "0.9.13",
+        "build": "107",
+        "matches_built": true
+      },
+      {
+        "app": "/Applications/Texture Studio.app/Contents/Applications/Checkpoint Compare.app",
+        "sha256": "af70df065cb48c289221b9826dbceaf259c9b9ed22857024050cc80d7e0956a2",
+        "signature_verified": true,
+        "hardened_runtime": true,
+        "version": "0.9.13",
+        "build": "107",
+        "matches_built": true
+      },
+      {
+        "app": "/Applications/Texture Studio.app/Contents/Applications/Material Dataset.app",
+        "sha256": "d0d81f1898f60213e2453207bd475c83c62f57a392b616c3f2301d3a8d1c215e",
+        "signature_verified": true,
+        "hardened_runtime": true,
+        "version": "0.9.13",
+        "build": "107",
+        "matches_built": true
+      },
+      {
+        "app": "/Applications/Texture Studio.app/Contents/Applications/Material Review.app",
+        "sha256": "2fdb12e8bf48bc11fa17ee3152428eb8ceae71a0e56a8c69e4e8b8dab8de8165",
+        "signature_verified": true,
+        "hardened_runtime": true,
+        "version": "0.9.13",
+        "build": "107",
+        "matches_built": true
+      },
+      {
+        "app": "/Applications/Texture Studio.app/Contents/Applications/Material Trainer.app",
+        "sha256": "8dacd9111325550a59acbd55ed00ea275fc0ee224a1a768de3e14a90a13c54ea",
+        "signature_verified": true,
+        "hardened_runtime": true,
+        "version": "0.9.13",
+        "build": "107",
+        "matches_built": true
+      }
+    ],
+    "installed_smoke_exit_code": 0,
+    "install_log": "/opt/ipde/ipde/out/training-throughput-audit/adaptive-install.log",
+    "status": "Built, signed, installed and verified",
+    "installation_note": "After the user closed the running app, installation succeeded to /Applications/Texture Studio.app. All five installed executable hashes exactly match the built bundles, deep/strict signatures and hardened runtime verified, installed main smoke exit zero. Earlier recovery-qualified fine-stage installation is historical evidence.",
+    "binary_note": "Normal hardened-runtime main executable differs from the isolated Release XCTest host; both use the recorded source snapshot."
+  },
+  "current_profile_assessment": {
+    "practical_performance_candidate": {
+      "size": 512,
+      "scope": "map-decoder",
+      "rank": 8,
+      "alpha": 8,
+      "synthetic_changed_input_seconds": 5.70648391667055,
+      "real_production_update_seconds": [
+        8.533406833,
+        5.76239175,
+        5.006646917,
+        4.934532792
+      ]
+    },
+    "ui_new_option_defaults": {
+      "size": 1024,
+      "scope": "final-map",
+      "rank": 8,
+      "alpha": 8
+    },
+    "saved_user_settings": "Resolution, scope and rank remain preserved; existing adapter layers retain their recorded rank and alpha. Adaptive execution changes do not silently migrate datasets to 512 or change adapter scope.",
+    "performance_limitation": "Both measured current 1K scopes exceed ten seconds for changed-input updates. Larger-grid production remains unqualified.",
+    "quality_limitation": "No equal-quality claim for 512 versus 1K, map-decoder versus final-map, or rank 8 versus rank 64."
+  }
+}

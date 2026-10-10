@@ -1,5 +1,9 @@
 # Native resource validation — 2026-10-09
 
+Current throughput work and fresh validation results are recorded in
+[the October 10 throughput investigation](validation/native-training-throughput-2026-10-10.md).
+The dated measurements below describe their stated source versions.
+
 ## Training CPU overhead — 2026-10-10
 
 Training activation checkpoints now retain independent, compact GPU buffers directly within the existing byte cap. Replay reuses those buffers without reading whole-grid activations into CPU `Data` or uploading another copy. Compiler/executable ownership and reverse-consumer eviction remain bounded as before.

@@ -2,6 +2,7 @@ import Accelerate
 import CryptoKit
 import Foundation
 import Metal
+import MetalPerformanceShaders
 import MetalPerformanceShadersGraph
 
 struct NativeMaterialPrediction: Sendable {
@@ -220,7 +221,7 @@ final class NativeMaterialModel: @unchecked Sendable {
 
     /// Reuses staged symbolic metadata and compact immutable feeds without
     /// compiling that graph. Disposable compiler owners and loaded executables
-    /// release their scratch storage after execution. Unstaged graphs stay fresh.
+    /// release their scratch storage after GPU completion. Unstaged graphs stay fresh.
     final class Program {
         let width: Int, height: Int, target: String
         let frozenStageCount: Int
@@ -231,32 +232,90 @@ final class NativeMaterialModel: @unchecked Sendable {
         private let adapterShapes: [String: [Int]]
         private let stagesEnabled: Bool
         private let checkpointByteLimit: UInt64?
+        private let coarseWorkspaceByteLimit: UInt64
+        private let coalescingActiveBlocks: Bool
         private let packages: NativeGraphPackageCache
         private var stagedProgram: GraphProgram?
         typealias Execution = GraphProgram.Execution
+        var executionStatistics: NativeGraphExecution.Statistics {
+            var result = packages.statistics
+            result.finalCommandBufferGPUSeconds = packages.stream.finalCommandBufferGPUSeconds
+            result.waitSeconds = packages.stream.waitSeconds
+            result.commandBuffers = packages.stream.commandBuffers
+            result.maximumInFlightStages = packages.stream.maximumInFlightStages
+            return result
+        }
 
-        init(model: NativeMaterialModel, width: Int, height: Int, target: String, staged: Bool = true, checkpointByteLimit: UInt64? = nil) throws {
+        /// Leave retained activations and the admitted model working set outside
+        /// the local workspace allowance of a coalesced backward stage.
+        static func coarseWorkspaceBudget(capacity: UInt64, checkpointBytes: UInt64, workingBytes: UInt64) -> UInt64 {
+            let frozenBytes = min(UInt64(2 * 1_073_741_824), capacity / 16)
+            return [min(checkpointBytes, capacity / 2), frozenBytes, workingBytes].reduce(capacity) {
+                $0 > $1 ? $0 - $1 : 0
+            }
+        }
+
+        init(model: NativeMaterialModel, width: Int, height: Int, target: String, staged: Bool = true, checkpointByteLimit: UInt64? = nil,
+             coalesceActiveBlocks: Bool? = nil) throws {
             guard ["height", "roughness", "normal"].contains(target), width >= 64, height >= 64,
                   width % 64 == 0, height % 64 == 0 else { throw StudioError("Unsupported native material grid or target.") }
             self.width = width; self.height = height; self.target = target
             baseWeights = model.baseWeights; layers = model.layers; architecture = model.architecture
             adapterShapes = model.adapterWeights.mapValues(\.shape)
             stagesEnabled = staged
+            let environment = ProcessInfo.processInfo.environment
+            // Enable adaptive active-block admission through 1K by default.
+            // Explicit overrides take priority; environment value 0 opts out.
+            let coalescing = staged && max(width, height) <= 1024 &&
+                (coalesceActiveBlocks ?? (environment["TEXTURE_STUDIO_COALESCE_ACTIVE_BLOCKS"] != "0"))
+            coalescingActiveBlocks = coalescing
             let capacity = MachineResources.current.maximumTrainingBytes
             // Spend only half the estimated spare capacity on checkpoints,
             // leaving the rest for transient stage and compiler allocations.
             // Frozen features retain their separate 2 GiB storage limit.
             let workingBytes = NativeMaterialTrainer.estimatedWorkingBytes(model: model, size: max(width, height))
             let spareBytes = capacity > workingBytes ? capacity - workingBytes : 0
-            let defaultCheckpointBytes = min(UInt64(12 * 1_073_741_824), min(capacity / 4, spareBytes / 2))
+            // Full 2K stages require substantially larger backend workspace
+            // than their logical tensors. Preserve that headroom instead of
+            // allowing checkpoints to turn GPU work into system swapping.
+            // Coarse active blocks retain fewer boundary activations but need
+            // larger local VJP workspace. Bound their checkpoint pool to leave
+            // headroom for the adaptive block admission policy below.
+            let checkpointCap = UInt64((coalescing ? 8 : max(width, height) > 1024 ? 6 : 24) * 1_073_741_824)
+            let defaultCheckpointBytes = min(checkpointCap, min(capacity / 2, spareBytes / 2))
             let checkpointBudget = checkpointByteLimit ?? defaultCheckpointBytes
             self.checkpointByteLimit = checkpointBudget
-            let packageCache = try NativeGraphPackageCache()
+            let coarseWorkspaceBudget = Self.coarseWorkspaceBudget(capacity: capacity,
+                checkpointBytes: checkpointBudget, workingBytes: workingBytes)
+            coarseWorkspaceByteLimit = coarseWorkspaceBudget
+            let codeCache: NativeGraphCodeCache?
+            let osBuild = NativeGraphCodeIdentity.osBuild
+            if staged, environment["TEXTURE_STUDIO_DISABLE_PROGRAM_CACHE"] != "1",
+               osBuild != "unknown",
+               let executableSHA256 = NativeGraphCodeIdentity.executableSHA256,
+               let device = MTLCreateSystemDefaultDevice() {
+                let a = model.architecture
+                let identity = NativeGraphCodeIdentity(executableSHA256: executableSHA256,
+                    osVersion: ProcessInfo.processInfo.operatingSystemVersionString, osBuild: osBuild,
+                    metalName: device.name, metalRegistryID: device.registryID, maximumTrainingBytes: capacity,
+                    baseSHA256: model.baseSHA256, width: width, height: height, target: target,
+                    architecture: [a.dim, a.heads, a.encoderBlocks, a.decoderBlocks, a.fusionBlocks, a.rrdbBlocks, a.rrdbWidth, a.growth,
+                        coalescing ? 1 : 0] + (coalescing ? [Int(coarseWorkspaceBudget)] : []),
+                    tensors: model.baseWeights.map { NativeGraphCodeIdentity.Tensor(name: $0.key, dtype: $0.value.dtype, shape: $0.value.shape) },
+                    layers: model.layers.map { NativeGraphCodeIdentity.Layer(name: $0.key, weightShape: $0.value.weightShape,
+                        rank: $0.value.rank, alphaBits: $0.value.alpha.bitPattern) })
+                let directory = environment["TEXTURE_STUDIO_PROGRAM_CACHE_DIRECTORY"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+                    ?? NativeGraphCodeCache.defaultRoot
+                codeCache = directory.flatMap { try? NativeGraphCodeCache(root: $0, identity: identity.fingerprint) }
+            } else { codeCache = nil }
+            let packageCache = try NativeGraphPackageCache(persistent: codeCache)
             packages = packageCache
             let engine = try autoreleasepool {
                 try GraphProgram(baseWeights: model.baseWeights, layers: model.layers, architecture: model.architecture,
                     adapters: model.adapterWeights, width: width, height: height, target: target, staged: staged,
-                    packageCache: staged ? packageCache : nil, checkpointByteLimit: checkpointBudget)
+                    packageCache: staged ? packageCache : nil, checkpointByteLimit: checkpointBudget,
+                    coarseWorkspaceByteLimit: coarseWorkspaceBudget,
+                    coalescingActiveBlocks: coalescing)
             }
             frozenStageCount = engine.frozenStageCount
             if staged { stagedProgram = engine }
@@ -267,6 +326,8 @@ final class NativeMaterialModel: @unchecked Sendable {
                      featureKey: String? = nil, checkCancellation: () throws -> Void = { try Task.checkCancellation() },
                      onStage: (Int, Int) -> Void = { _, _ in },
                      onOperation: (String, Int, Int) -> Void = { _, _, _ in }) throws -> Execution {
+            let activity = ProcessInfo.processInfo.beginActivity(options: .userInitiated, reason: "Computing the requested material model")
+            defer { ProcessInfo.processInfo.endActivity(activity) }
             do {
                 try checkCancellation()
                 return try autoreleasepool {
@@ -281,18 +342,25 @@ final class NativeMaterialModel: @unchecked Sendable {
                         onOperation("Building model execution graph", 0, 1)
                         engine = try GraphProgram(baseWeights: baseWeights, layers: layers, architecture: architecture,
                             adapters: adapters, width: width, height: height, target: target, staged: stagesEnabled,
-                            packageCache: stagesEnabled ? packages : nil, checkpointByteLimit: checkpointByteLimit)
+                            packageCache: stagesEnabled ? packages : nil, checkpointByteLimit: checkpointByteLimit,
+                            coarseWorkspaceByteLimit: coarseWorkspaceByteLimit,
+                            coalescingActiveBlocks: coalescingActiveBlocks)
                         if stagesEnabled { stagedProgram = engine }
                         onOperation("Building model execution graph", 1, 1)
                     }
                     defer {
+                        // Errors and Abort must join submitted GPU work before
+                        // releasing its graph, inputs or checkpoint storage.
+                        try? packages.stream.finish()
                         engine.releaseCompilerOwner()
                         optimizerPrepared = optimizerPrepared || engine.optimizerPrepared
                     }
                     try engine.validateAdapters(adapters)
-                    return try engine.execute(rgb: rgb, adapters: adapters, reference: reference, learningRate: learningRate,
+                    let result = try engine.execute(rgb: rgb, adapters: adapters, reference: reference, learningRate: learningRate,
                         step: step, optimizerState: optimizerState, gradientsOnly: gradientsOnly, featureKey: featureKey,
                         checkCancellation: checkCancellation, onStage: onStage, onOperation: onOperation)
+                    try packages.stream.finish()
+                    return result
                 }
             } catch {
                 // Preparation can stop after creating only some derivative
@@ -311,6 +379,7 @@ final class NativeMaterialModel: @unchecked Sendable {
         private var checkpointNames: [String]?
         private var generatorAnchor: MPSGraphTensor?
         private let checkpointByteLimit: UInt64?
+        private let coarseWorkspaceByteLimit: UInt64
         let graph = MPSGraph()
         let width: Int, height: Int, target: String
         let input: MPSGraphTensor
@@ -336,12 +405,14 @@ final class NativeMaterialModel: @unchecked Sendable {
         private var executableCache: [String: MPSGraphExecutable] = [:]
         private var frozenStages: [[(source: MPSGraphTensor, feed: MPSGraphTensor)]] = []
         private let stagesEnabled: Bool
+        private let coalescingActiveBlocks: Bool
+        private var isolatedWorkspaceStages = Set<Int>()
         private var dependencies: [MPSGraphTensor: Set<MPSGraphTensor>] = [:]
         private var featureCache: [String: [MPSGraphTensor: MPSGraphTensorData]] = [:]
         private var featureOrder: [String] = []
         private var featureBytes: UInt64 = 0
         private var adapterInfluencedFeeds = Set<MPSGraphTensor>()
-        private var coalescingFrozenBlock = false
+        private var coalescingBlock = false
         private var finalLayerOnly: Bool {
             !layers.isEmpty && layers.keys.allSatisfy { $0 == "ups.\(["normal": 1, "roughness": 2, "height": 3][target]!).model.10" }
         }
@@ -379,19 +450,33 @@ final class NativeMaterialModel: @unchecked Sendable {
                 }
             }
         }
-        convenience init(model: NativeMaterialModel, width: Int, height: Int, target: String, staged: Bool = true, checkpointByteLimit: UInt64? = nil) throws {
+        convenience init(model: NativeMaterialModel, width: Int, height: Int, target: String, staged: Bool = true, checkpointByteLimit: UInt64? = nil,
+                         coarseWorkspaceByteLimit: UInt64? = nil,
+                         coalescingActiveBlocks: Bool = false) throws {
+            guard ["height", "roughness", "normal"].contains(target), width >= 64, height >= 64,
+                  width % 64 == 0, height % 64 == 0 else { throw StudioError("Unsupported native material grid or target.") }
+            let workspaceBudget = coarseWorkspaceByteLimit ?? Program.coarseWorkspaceBudget(
+                capacity: MachineResources.current.maximumTrainingBytes,
+                checkpointBytes: checkpointByteLimit ?? UInt64(2 * 1_073_741_824),
+                workingBytes: NativeMaterialTrainer.estimatedWorkingBytes(model: model, size: max(width, height)))
             try self.init(baseWeights: model.baseWeights, layers: model.layers, architecture: model.architecture,
-                adapters: model.adapterWeights, width: width, height: height, target: target, staged: staged, checkpointByteLimit: checkpointByteLimit)
+                adapters: model.adapterWeights, width: width, height: height, target: target, staged: staged,
+                checkpointByteLimit: checkpointByteLimit, coarseWorkspaceByteLimit: workspaceBudget,
+                coalescingActiveBlocks: coalescingActiveBlocks)
         }
         fileprivate init(baseWeights: [String: NativeTensor], layers: [String: AdapterLayer], architecture: Architecture,
                      adapters: [String: NativeTensor], width: Int, height: Int, target: String, staged: Bool = true,
-                     packageCache: NativeGraphPackageCache? = nil, checkpointByteLimit: UInt64? = nil, checkpointNames: [String]? = nil) throws {
+                     packageCache: NativeGraphPackageCache? = nil, checkpointByteLimit: UInt64? = nil, checkpointNames: [String]? = nil,
+                     coarseWorkspaceByteLimit: UInt64,
+                     coalescingActiveBlocks: Bool = false) throws {
             guard ["height", "roughness", "normal"].contains(target), width >= 64, height >= 64,
                   width % 64 == 0, height % 64 == 0 else { throw StudioError("Unsupported native material grid or target.") }
             // Share immutable base storage without retaining the model that
             // owns this program, avoiding a cycle through the program cache.
             self.baseWeights = baseWeights; self.layers = layers; self.architecture = architecture
             self.stagesEnabled = staged; self.packageCache = packageCache; self.checkpointByteLimit = checkpointByteLimit; self.checkpointNames = checkpointNames
+            self.coarseWorkspaceByteLimit = coarseWorkspaceByteLimit
+            self.coalescingActiveBlocks = coalescingActiveBlocks && max(width, height) <= 1024
             self.width = width; self.height = height; self.target = target
             input = graph.placeholder(shape: [1, 3, height, width].ns, dataType: .float32, name: "native_rgb")
             for name in adapters.keys.sorted() {
@@ -452,7 +537,7 @@ final class NativeMaterialModel: @unchecked Sendable {
             return result
         }
         private func linearGeluBoundary(_ value: MPSGraphTensor, _ name: String) throws -> MPSGraphTensor {
-            if stagesEnabled, !coalescingFrozenBlock, layers[name] != nil {
+            if stagesEnabled, !coalescingBlock, layers[name] != nil {
                 let preactivation = boundary(try linear(value, name))
                 let index = frozenStages.count
                 let result = boundary(gelu(preactivation))
@@ -462,7 +547,7 @@ final class NativeMaterialModel: @unchecked Sendable {
             let preactivation = try linear(value, name)
             let index = frozenStages.count
             let result = boundary(gelu(preactivation))
-            if stagesEnabled, !coalescingFrozenBlock, layers[name] == nil {
+            if stagesEnabled, !coalescingBlock, layers[name] == nil {
                 immutableLinearGeluStages[index] = ImmutableLinearGelu(input: value, preactivation: preactivation,
                     weights: try tensor(name + ".weight"))
             }
@@ -492,7 +577,7 @@ final class NativeMaterialModel: @unchecked Sendable {
             let grnSource = add(add(weighted, try tensor(prefix + ".grn.beta", shape: [1, 1, 1, channels * 4])), grnInput)
             let grnStage = frozenStages.count
             x = boundary(grnSource)
-            if stagesEnabled, !coalescingFrozenBlock { sameShapeResidualOperands[grnStage] = [weighted, grnInput] }
+            if stagesEnabled, !coalescingBlock { sameShapeResidualOperands[grnStage] = [weighted, grnInput] }
             x = boundary(try linear(x, prefix + ".pwconv2"))
             x = mul(x, try tensor(prefix + ".gamma", shape: [channels]))
             return add(value, permute(x, [0, 3, 1, 2]))
@@ -571,21 +656,30 @@ final class NativeMaterialModel: @unchecked Sendable {
             // A frozen block needs only its terminal features. Cutting its
             // normalization, GELU, GRN and attention separately would compile,
             // reload and synchronize about sixteen packages per block without
-            // saving any backward work. Keep fine cuts on every adapter path
-            // and on grids whose conservative block live set is too large.
+            // saving any backward work. The adaptive policy also uses a complete
+            // block VJP on adapter paths at up to 1K; larger grids and blocks
+            // whose conservative live set is too large retain fine cuts.
             let parameterDependencies = Set(parameterFeeds.values).union(adapterInfluencedFeeds)
             let hasActiveInput = !requiredFeeds([value]).isDisjoint(with: parameterDependencies)
             let hasActiveWeights = layers.keys.contains { $0.hasPrefix(prefix + ".") }
             let blockBytes = UInt64(shape(value).reduce(4, *))
-            let canCoalesce = stagesEnabled && !hasActiveInput && !hasActiveWeights &&
-                blockBytes <= MachineResources.current.maximumTrainingBytes / 24 / 3
+            let frozenForward = !hasActiveInput && !hasActiveWeights
+            let workspaceBudget = frozenForward ? MachineResources.current.maximumTrainingBytes : coarseWorkspaceByteLimit
+            let canCoalesce = stagesEnabled && (frozenForward || coalescingActiveBlocks) &&
+                blockBytes <= workspaceBudget / 24 / 3
             if canCoalesce {
-                coalescingFrozenBlock = true
+                coalescingBlock = true
                 let result: MPSGraphTensor
                 do { result = try blockOperations(value, prefix, shifted: shifted) }
-                catch { coalescingFrozenBlock = false; throw error }
-                coalescingFrozenBlock = false
-                return boundary(result)
+                catch { coalescingBlock = false; throw error }
+                coalescingBlock = false
+                let index = frozenStages.count
+                let output = boundary(result)
+                // An active block's complete VJP reserves one local workspace.
+                // Its small logical boundaries must not permit two such hidden
+                // arenas to overlap in the submission window.
+                if !frozenForward { isolatedWorkspaceStages.insert(index) }
+                return output
             }
             return try blockOperations(value, prefix, shifted: shifted)
         }
@@ -619,6 +713,12 @@ final class NativeMaterialModel: @unchecked Sendable {
             let x4 = add(leaky(try conv(cat([value, x1, x2, x3], 1), prefix + ".conv4.0")), x2)
             let x5 = try conv(cat([value, x1, x2, x3, x4], 1), prefix + ".conv5.0")
             return boundary(add(value, mul(x5, c(0.2))))
+        }
+        private func rrdb(_ value: MPSGraphTensor, _ prefix: String) throws -> MPSGraphTensor {
+            try Task.checkCancellation()
+            var x = value
+            for r in 1...3 { x = try rdb(x, prefix + ".RDB\(r)") }
+            return boundary(add(value, mul(x, c(0.2))))
         }
         private func build(_ value: MPSGraphTensor) throws -> MPSGraphTensor {
             let specification = architecture
@@ -679,9 +779,7 @@ final class NativeMaterialModel: @unchecked Sendable {
             x = boundary(try conv(x, prefix + ".0"))
             let residual = x
             for i in 0..<specification.rrdbBlocks {
-                let input = x
-                for r in 1...3 { x = try rdb(x, prefix + ".1.sub.\(i).RDB\(r)") }
-                x = boundary(add(input, mul(x, c(0.2))))
+                x = try rrdb(x, prefix + ".1.sub.\(i)")
             }
             x = boundary(add(residual, try conv(x, prefix + ".1.sub.\(specification.rrdbBlocks)")))
             // .2 and .5 are the two original nearest2 upsamplers, omitted.
@@ -691,7 +789,7 @@ final class NativeMaterialModel: @unchecked Sendable {
         // Boundaries retain the complete native grid and exact forward map.
         // Reverse-stage VJPs carry gradients across all adapted boundaries.
         private func boundary(_ value: MPSGraphTensor) -> MPSGraphTensor {
-            if !stagesEnabled || coalescingFrozenBlock { return value }
+            if !stagesEnabled || coalescingBlock { return value }
             return freeze([value], name: "native_stage_\(frozenStages.count)")[0]
         }
         private func requiredFeeds(_ targets: [MPSGraphTensor]) -> Set<MPSGraphTensor> {
@@ -718,9 +816,29 @@ final class NativeMaterialModel: @unchecked Sendable {
         private func executeData(key: String, feeds: [MPSGraphTensor: MPSGraphTensorData], targets: [MPSGraphTensor],
                                  checkCancellation: () throws -> Void) throws -> [MPSGraphTensorData] {
             if let packageCache {
-                return try NativeGraphExecution.runPackaged(graph, feeds: feeds, targets: targets, key: key, packages: packageCache, compile: {
-                    try self.compilePackage(key: key, feeds: feeds, packages: packageCache)
-                }, checkCancellation: checkCancellation)
+                let isolated: Bool
+                if key.hasPrefix("forward-"), let index = Int(key.dropFirst("forward-".count)) {
+                    isolated = isolatedWorkspaceStages.contains(index)
+                } else if key.hasPrefix("reverse-"), let index = Int(key.dropFirst("reverse-".count)) {
+                    isolated = isolatedWorkspaceStages.contains(index)
+                } else { isolated = false }
+                if isolated {
+                    // Logical input/output sizes understate a coalesced block's
+                    // hidden backend workspace. Never overlap its execution
+                    // with another stage, even when replay reuses cached code.
+                    try packageCache.stream.finish()
+                    try checkCancellation()
+                }
+                do {
+                    let result = try NativeGraphExecution.runPackaged(graph, feeds: feeds, targets: targets, key: key, packages: packageCache, compile: {
+                        try self.compilePackage(key: key, feeds: feeds, packages: packageCache)
+                    }, checkCancellation: checkCancellation)
+                    if isolated { try packageCache.stream.finish(); try checkCancellation() }
+                    return result
+                } catch {
+                    if isolated { try? packageCache.stream.finish() }
+                    throw error
+                }
             }
             return try NativeGraphExecution.runData(graph, feeds: feeds, targets: targets, cache: &executableCache,
                                                     checkCancellation: checkCancellation)
@@ -733,7 +851,9 @@ final class NativeMaterialModel: @unchecked Sendable {
                 if packageCompiler == nil {
                     compilerRetainedBytes = 0
                     packageCompiler = try GraphProgram(baseWeights: baseWeights, layers: layers, architecture: architecture,
-                        adapters: parameters, width: width, height: height, target: target, staged: stagesEnabled)
+                        adapters: parameters, width: width, height: height, target: target, staged: stagesEnabled,
+                        coarseWorkspaceByteLimit: coarseWorkspaceByteLimit,
+                        coalescingActiveBlocks: coalescingActiveBlocks)
                     compilerJobs = 0
                 }
                 let owner = packageCompiler!
@@ -795,7 +915,10 @@ final class NativeMaterialModel: @unchecked Sendable {
         }
         private func executeValues(key: String, feeds: [MPSGraphTensor: MPSGraphTensorData], targets: [MPSGraphTensor],
                                    checkCancellation: () throws -> Void) throws -> [[Float]] {
-            try executeData(key: key, feeds: feeds, targets: targets, checkCancellation: checkCancellation).map { try NativeGraphExecution.tensor($0).floatValues() }
+            let results = try executeData(key: key, feeds: feeds, targets: targets, checkCancellation: checkCancellation)
+            try packageCache?.stream.finish()
+            try checkCancellation()
+            return try results.map { try NativeGraphExecution.tensor($0).floatValues() }
         }
         private func immutableFeeds() throws -> [MPSGraphTensor: MPSGraphTensorData] {
             if let immutableData { return immutableData }
@@ -1154,7 +1277,7 @@ final class NativeMaterialModel: @unchecked Sendable {
         /// adapted generator. Remaining checkpoints minimize exact replay work
         /// per byte over the dependency DAG, within the same hard byte cap.
         private func checkpointAnchors(candidates: [MPSGraphTensor], budget: UInt64,
-                    stageNeeds: [Set<MPSGraphTensor>], finalNeeds: Set<MPSGraphTensor>,
+                    stageNeeds: [Set<MPSGraphTensor>],
                     frozenRoots: Set<MPSGraphTensor>, checkCancellation: () throws -> Void) throws -> Set<MPSGraphTensor> {
             func bytes(_ tensor: MPSGraphTensor) -> UInt64 { UInt64(shape(tensor).reduce(4, *)) }
             let byName = Dictionary(uniqueKeysWithValues: candidates.map { ($0.operation.name, $0) })
@@ -1183,7 +1306,11 @@ final class NativeMaterialModel: @unchecked Sendable {
             // policy if future cuts expose multiple independent outputs.
             guard frozenStages.allSatisfy({ $0.count == 1 }) else { return save(original) }
             let integerNeeds = stageNeeds.map { needs in needs.compactMap { producers[$0] }.sorted() }
-            let integerFinalNeeds = finalNeeds.compactMap { producers[$0] }.sorted()
+            // Score the dependencies actually consumed by each VJP. Using
+            // the primal stage's inputs overvalues activations that constant
+            // and explicit derivatives never replay (residuals, slices, GELU).
+            let integerLossNeeds = lossReverse!.needs.compactMap { producers[$0] }.sorted()
+            let integerReverseNeeds = reverseStages.mapValues { $0.needs.compactMap { producers[$0] }.sorted() }
             let frozenIndices = Set(frozenRoots.map { producers[$0]! })
             let reverseOrder = activeStages.sorted().reversed()
             func replayCount(_ anchors: Set<MPSGraphTensor>) -> Int {
@@ -1200,9 +1327,9 @@ final class NativeMaterialModel: @unchecked Sendable {
                     for index in needs { collect(index) }
                     return count
                 }
-                var count = replay(integerFinalNeeds)
+                var count = replay(integerLossNeeds)
                 for index in reverseOrder {
-                    count += replay(integerNeeds[index])
+                    count += replay(integerReverseNeeds[index]!)
                     available[index] = false
                 }
                 return count
@@ -1252,16 +1379,18 @@ final class NativeMaterialModel: @unchecked Sendable {
             // buffers for replay instead of synchronously reading whole-grid
             // activations into Data and uploading them again for every VJP.
             var checkpoints: [MPSGraphTensor: MPSGraphTensorData] = [:]
+            var checkpointBytes: UInt64 = 0
             var frozenValues: [MPSGraphTensor: MPSGraphTensorData] = [:]
             // Keep cuts that reduce replay most within the fixed RAM budget.
             let candidates = frozenStages.flatMap { $0.map(\.feed) }.filter { activeFeatures.contains($0) && backwardNeeds.contains($0) }
-            let checkpointBudget = min(checkpointByteLimit ?? UInt64(2 * 1_073_741_824), MachineResources.current.maximumTrainingBytes / 4)
+            let checkpointBudget = min(checkpointByteLimit ?? UInt64(2 * 1_073_741_824), MachineResources.current.maximumTrainingBytes / 2)
             let anchorSet = try checkpointAnchors(candidates: candidates, budget: checkpointBudget, stageNeeds: stageNeeds,
-                finalNeeds: finalNeeds, frozenRoots: frozenRoots, checkCancellation: checkCancellation)
+                frozenRoots: frozenRoots, checkCancellation: checkCancellation)
             var feeds = base
             let frozenCacheHit: Bool
             if let featureKey, let cached = featureCache[featureKey], frozenRoots.isSubset(of: Set(cached.keys)) {
                 frozenValues = cached; feeds.merge(cached) { _, new in new }; frozenCacheHit = true
+                featureOrder.removeAll { $0 == featureKey }; featureOrder.append(featureKey)
             } else { frozenCacheHit = false }
             var remaining = finalNeeds
             var neededAfter = [Set<MPSGraphTensor>](repeating: [], count: frozenStages.count)
@@ -1290,6 +1419,8 @@ final class NativeMaterialModel: @unchecked Sendable {
                             throw StudioError("Native training checkpoint retained noncompact activation storage.")
                         }
                         checkpoints[item.feed] = checkpoint
+                        checkpointBytes += UInt64(array.resourceSize())
+                        packageCache?.statistics.peakCheckpointBytes = max(packageCache?.statistics.peakCheckpointBytes ?? 0, checkpointBytes)
                     }
                     if frozenRoots.contains(item.feed) { frozenValues[item.feed] = data[offset] }
                 }
@@ -1315,7 +1446,7 @@ final class NativeMaterialModel: @unchecked Sendable {
             onOperation("Computing training loss", 1, 1)
             feeds.removeAll()
             var adjoints: [MPSGraphTensor: MPSGraphTensorData] = [:]
-            var parameterGradients: [String: NativeTensor] = [:]
+            var gradientBuffers: [String: MPSGraphTensorData] = [:]
             let reverseOrder = activeStages.sorted().reversed()
             var reversePosition = 0
             func replayInputs(_ needs: Set<MPSGraphTensor>) throws -> [MPSGraphTensor: MPSGraphTensorData] {
@@ -1351,6 +1482,7 @@ final class NativeMaterialModel: @unchecked Sendable {
                 // Last-consumer release bounds storage without that repetition.
                 for (position, index) in order.enumerated() {
                     try checkCancellation()
+                    packageCache?.statistics.recomputedStages += 1
                     let backwardLabel = reversePosition == 0 ? "Loss gradients" : "Backward pass \(reversePosition)/\(reverseOrder.count)"
                     onOperation(backwardLabel + " · recomputing inputs", position, order.count)
                     var inputs: [MPSGraphTensor: MPSGraphTensorData] = [:]
@@ -1361,7 +1493,20 @@ final class NativeMaterialModel: @unchecked Sendable {
                         try executeData(key: "forward-\(index)", feeds: inputs, targets: frozenStages[index].map(\.source),
                                         checkCancellation: checkCancellation)
                     }
-                    for (offset, item) in frozenStages[index].enumerated() { live[item.feed] = data[offset] }
+                    for (offset, item) in frozenStages[index].enumerated() {
+                        live[item.feed] = data[offset]
+                        // Reverse traversal frees anchors as soon as their
+                        // consumers finish. Reuse that same bounded capacity
+                        // for replayed features needed by earlier VJPs instead
+                        // of recomputing the same prefix for each derivative.
+                        let bytes = UInt64(shape(item.feed).reduce(4, *))
+                        if activeFeatures.contains(item.feed), backwardNeeds.contains(item.feed),
+                           checkpoints[item.feed] == nil, checkpointBytes + bytes <= checkpointBudget {
+                            checkpoints[item.feed] = data[offset]
+                            checkpointBytes += bytes
+                            packageCache?.statistics.peakCheckpointBytes = max(packageCache?.statistics.peakCheckpointBytes ?? 0, checkpointBytes)
+                        }
+                    }
                     live = live.filter { neededAfter[position].contains($0.key) }
                     onOperation(backwardLabel + " · recomputing inputs", position + 1, order.count)
                 }
@@ -1378,11 +1523,12 @@ final class NativeMaterialModel: @unchecked Sendable {
                 }
                 for (index, input) in plan.inputs.enumerated() {
                     if let name = parameterNames[input] {
-                        let value = try NativeGraphExecution.tensor(data[index])
-                        if let old = parameterGradients[name] {
-                            let a = try old.floatValues(), b = try value.floatValues()
-                            parameterGradients[name] = .floats(zip(a, b).map(+), shape: old.shape)
-                        } else { parameterGradients[name] = value }
+                        // Reading each factor here serializes every reverse
+                        // stage with the CPU. Accumulate on the GPU and read
+                        // the compact factors once the backward pass finishes.
+                        if let old = gradientBuffers[name] {
+                            gradientBuffers[name] = try sum(old, data[index], checkCancellation: checkCancellation)
+                        } else { gradientBuffers[name] = data[index] }
                     } else if let old = adjoints[input] { adjoints[input] = try sum(old, data[index], checkCancellation: checkCancellation) }
                     else { adjoints[input] = data[index] }
                 }
@@ -1403,11 +1549,17 @@ final class NativeMaterialModel: @unchecked Sendable {
                 try autoreleasepool { try backward(reverseStages[index]!, seeds: completeSeeds) }
                 // Reverse consumers are finished; discarded anchors cannot be
                 // needed by a later (earlier-in-forward-order) VJP.
-                for item in stage { checkpoints.removeValue(forKey: item.feed) }
+                for item in stage {
+                    if let removed = checkpoints.removeValue(forKey: item.feed) {
+                        checkpointBytes -= UInt64(removed.shape.reduce(4) { $0 * $1.intValue })
+                    }
+                }
                 onStage(frozenStages.count - index, frozenStages.count)
                 onOperation("Backward pass", reversePosition, reverseOrder.count)
             }
+            try packageCache?.stream.finish()
             try checkCancellation()
+            let parameterGradients = try gradientBuffers.mapValues { try NativeGraphExecution.tensor($0) }
             for name in parameterFeeds.keys {
                 guard let gradient = parameterGradients[name], try gradient.floatValues().allSatisfy(\.isFinite) else {
                     throw StudioError("Native training returned a missing or nonfinite adapter gradient.")
@@ -1497,9 +1649,11 @@ final class NativeMaterialModel: @unchecked Sendable {
     }
 }
 
-/// Stores only compiled code and value metadata. No symbolic graph, tensor,
-/// executable, activation, or optimizer state survives in this cache.
+/// Disk packages contain only compiled code and value metadata. Loaded
+/// executables live through GPU completion, then release their scratch arenas.
 private final class NativeGraphPackageCache {
+    var statistics = NativeGraphExecution.Statistics()
+    let stream = NativeGraphExecution.Stream()
     struct Entry {
         let url: URL
         let inputNames: [String]
@@ -1509,21 +1663,67 @@ private final class NativeGraphPackageCache {
         let outputShapes: [[Int]]
         let outputTypes: [MPSDataType]
         let bytes: UInt64
+        let persistent: Bool
+    }
+    private struct Metadata: Codable {
+        let inputNames: [String]
+        let inputShapes: [[Int]]
+        let inputTypes: [UInt32]
+        let requestedIndices: [Int]
+        let outputShapes: [[Int]]
+        let outputTypes: [UInt32]
+        let bytes: UInt64
+        var valid: Bool {
+            func validShape(_ shape: [Int]) -> Bool {
+                var count = 4
+                for dimension in shape {
+                    let product = count.multipliedReportingOverflow(by: dimension)
+                    guard dimension > 0, !product.overflow else { return false }
+                    count = product.partialValue
+                }
+                return true
+            }
+            let allowed = Set([MPSDataType.float32.rawValue, MPSDataType.int32.rawValue, MPSDataType.int64.rawValue])
+            guard bytes > 0, bytes <= 1 << 30, !inputNames.contains(""), Set(inputNames).count == inputNames.count,
+                  inputNames.count == inputShapes.count, inputNames.count == inputTypes.count,
+                  inputTypes.allSatisfy({ allowed.contains($0) }), inputShapes.allSatisfy(validShape),
+                  !requestedIndices.isEmpty, outputShapes.count == requestedIndices.count,
+                  outputTypes.count == requestedIndices.count, outputShapes.allSatisfy(validShape),
+                  outputTypes.allSatisfy({ $0 == MPSDataType.float32.rawValue }),
+                  let last = requestedIndices.max(), last >= 0, last < requestedIndices.count,
+                  Set(requestedIndices) == Set(0...last) else { return false }
+            return true
+        }
     }
     private let root: URL
+    private let persistent: NativeGraphCodeCache?
     private var entries: [String: Entry] = [:]
     private var order: [String] = []
     private var bytes: UInt64 = 0
     private let maximumBytes: UInt64 = 1 << 30
-    init() throws {
+    init(persistent: NativeGraphCodeCache? = nil) throws {
+        self.persistent = persistent
         root = FileManager.default.temporaryDirectory.appendingPathComponent("NativeTrainingPrograms-" + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
     deinit { try? FileManager.default.removeItem(at: root) }
     func entry(for key: String) -> Entry? {
-        guard let value = entries[key] else { return nil }
-        order.removeAll { $0 == key }; order.append(key)
-        return value
+        if let value = entries[key] {
+            order.removeAll { $0 == key }; order.append(key)
+            return value
+        }
+        guard let package = persistent?.package(for: key),
+              let metadata = try? JSONDecoder().decode(Metadata.self, from: package.metadata), metadata.valid else { return nil }
+        let inputTypes: [MPSDataType] = metadata.inputTypes.map {
+            $0 == MPSDataType.int64.rawValue ? .int64 : $0 == MPSDataType.int32.rawValue ? .int32 : .float32
+        }
+        let entry = Entry(url: package.url, inputNames: metadata.inputNames, inputShapes: metadata.inputShapes,
+            inputTypes: inputTypes, requestedIndices: metadata.requestedIndices,
+            outputShapes: metadata.outputShapes, outputTypes: [MPSDataType](repeating: .float32, count: metadata.outputTypes.count),
+            bytes: metadata.bytes, persistent: true)
+        do { try remember(entry, key: key) } catch { return nil }
+        statistics.diskPackageCacheHits += 1
+        return entry
     }
     func packageURL() -> URL { root.appendingPathComponent(UUID().uuidString + ".mpsgraphpackage", isDirectory: true) }
     func insert(key: String, url: URL, inputNames: [String], inputShapes: [[Int]], inputTypes: [MPSDataType], requestedIndices: [Int], outputShapes: [[Int]], outputTypes: [MPSDataType]) throws -> Entry {
@@ -1539,21 +1739,146 @@ private final class NativeGraphPackageCache {
             try? FileManager.default.removeItem(at: url)
             throw StudioError("A compiled native training program exceeds its bounded code cache.")
         }
-        while bytes + size > maximumBytes, let oldest = order.first {
+        let metadata = Metadata(inputNames: inputNames, inputShapes: inputShapes, inputTypes: inputTypes.map(\.rawValue),
+            requestedIndices: requestedIndices, outputShapes: outputShapes, outputTypes: outputTypes.map(\.rawValue), bytes: size)
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let stored = (try? encoder.encode(metadata)).flatMap { persistent?.store(package: url, metadata: $0, key: key) }
+        let entry = Entry(url: stored?.url ?? url, inputNames: inputNames, inputShapes: inputShapes, inputTypes: inputTypes,
+            requestedIndices: requestedIndices, outputShapes: outputShapes, outputTypes: outputTypes, bytes: size, persistent: stored != nil)
+        if stored != nil { try? FileManager.default.removeItem(at: url) }
+        try remember(entry, key: key)
+        return entry
+    }
+    private func remember(_ entry: Entry, key: String) throws {
+        while bytes + entry.bytes > maximumBytes, let oldest = order.first {
             order.removeFirst()
             if let removed = entries.removeValue(forKey: oldest) {
                 bytes -= removed.bytes
-                try FileManager.default.removeItem(at: removed.url)
+                if !removed.persistent { try FileManager.default.removeItem(at: removed.url) }
             }
         }
-        let entry = Entry(url: url, inputNames: inputNames, inputShapes: inputShapes, inputTypes: inputTypes,
-            requestedIndices: requestedIndices, outputShapes: outputShapes, outputTypes: outputTypes, bytes: size)
-        entries[key] = entry; order.append(key); bytes += size
-        return entry
+        entries[key] = entry; order.append(key); bytes += entry.bytes
     }
 }
 
 enum NativeGraphExecution {
+    struct Statistics: Codable {
+        var stages = 0
+        var compilations = 0
+        var diskPackageCacheHits = 0
+        var compilationSeconds = 0.0
+        var packageLoadSeconds = 0.0
+        var executionSeconds = 0.0
+        // MPS may commit intermediate buffers internally. This measures only
+        // their final roots and must not be interpreted as GPU utilization.
+        var finalCommandBufferGPUSeconds = 0.0
+        var waitSeconds = 0.0
+        var commandBuffers = 0
+        var maximumInFlightStages = 0
+        var recomputedStages = 0
+        var peakCheckpointBytes: UInt64 = 0
+    }
+
+    /// A program-local, ordered GPU stream. The CPU can encode the next stage
+    /// while the GPU executes its predecessor. A small submission window and
+    /// conservative live-byte estimate bound overlap; large stages run alone.
+    /// CPU reads, errors and cancellation always join the outstanding work.
+    final class Stream {
+        private final class Completion: @unchecked Sendable {
+            private let lock = NSLock()
+            private var failure: Error?
+            func record(_ error: Error?) { lock.withLock { if failure == nil { failure = error } } }
+            func check() throws { if let error = lock.withLock({ failure }) { throw error } }
+        }
+        private struct Submission {
+            let commandBuffer: MPSCommandBuffer
+            let finalBuffer: MTLCommandBuffer
+            let executable: MPSGraphExecutable
+            let inputs: [MPSGraphTensorData]
+            let outputs: [MPSGraphTensorData]
+            let completion: Completion
+            let bytes: UInt64
+        }
+        fileprivate let queue = device?.makeCommandQueue()
+        private var pending: [Submission] = []
+        private var pendingBytes: UInt64 = 0
+        private let byteLimit = min(UInt64(2 * 1_073_741_824), MachineResources.current.maximumTrainingBytes / 16)
+        private(set) var finalCommandBufferGPUSeconds = 0.0
+        private(set) var waitSeconds = 0.0
+        private(set) var commandBuffers = 0
+        private(set) var maximumInFlightStages = 0
+
+        deinit { try? finish() }
+        fileprivate func prepare(bytes: UInt64) throws {
+            while let first = pending.first {
+                let completed = first.finalBuffer.status == .completed || first.finalBuffer.status == .error
+                guard completed || pending.count >= 2 || pendingBytes + bytes > byteLimit else { break }
+                try finishFirst()
+            }
+        }
+        private func finishFirst() throws {
+            let submission = pending.removeFirst()
+            pendingBytes -= submission.bytes
+            let started = ProcessInfo.processInfo.systemUptime
+            submission.finalBuffer.waitUntilCompleted()
+            waitSeconds += ProcessInfo.processInfo.systemUptime - started
+            finalCommandBufferGPUSeconds += max(0, submission.finalBuffer.gpuEndTime - submission.finalBuffer.gpuStartTime)
+            // Keep the compiler arena and every input alive through completion.
+            defer { withExtendedLifetime(submission) {} }
+            if let error = submission.finalBuffer.error { throw error }
+            try submission.completion.check()
+        }
+        func finish() throws {
+            var failure: Error?
+            while !pending.isEmpty {
+                do { try finishFirst() } catch { if failure == nil { failure = error } }
+            }
+            if let failure { throw StudioError("Native GPU execution failed: \(failure.localizedDescription)") }
+        }
+        fileprivate func encode(_ executable: MPSGraphExecutable, inputs: [MPSGraphTensorData],
+                                provided: [MPSGraphTensorData], buffers: [MTLBuffer],
+                                shapes: [[Int]], types: [MPSDataType], bytes: UInt64) throws -> [MPSGraphTensorData] {
+            guard let raw = queue?.makeCommandBuffer() else { throw StudioError("Could not create a native training command buffer.") }
+            let commandBuffer = MPSCommandBuffer(commandBuffer: raw)
+            let completion = Completion()
+            let descriptor = MPSGraphExecutableExecutionDescriptor()
+            descriptor.waitUntilCompleted = false
+            descriptor.completionHandler = { _, error in completion.record(error) }
+            executable.options = .synchronizeResults
+            var submitted = false
+            defer {
+                if !submitted {
+                    // MPS may commit intermediate command buffers while
+                    // encoding. Commit/join its final buffer on every exit.
+                    let last = commandBuffer.rootCommandBuffer
+                    commandBuffer.commit(); last.waitUntilCompleted()
+                }
+            }
+            let results = executable.encode(to: commandBuffer, inputs: inputs, results: provided, executionDescriptor: descriptor)
+            guard results.count == provided.count else { throw StudioError("Native graph returned incomplete output storage.") }
+            var independent = results
+            for (index, result) in results.enumerated() {
+                guard result.shape.map(\.intValue) == shapes[index], result.dataType == types[index] else {
+                    throw StudioError("Native graph changed compact output shape or precision.")
+                }
+                if result === provided[index], result.mpsndarray().parent == nil { continue }
+                result.mpsndarray().exportData(with: commandBuffer, to: buffers[index], destinationDataType: .float32,
+                    offset: 0, rowStrides: nil)
+                independent[index] = provided[index]
+            }
+            // Capture the final root after encode: MPS is allowed to commit
+            // and replace the original root while encoding a large graph.
+            let last = commandBuffer.rootCommandBuffer
+            commandBuffer.commit()
+            submitted = true
+            pending.append(Submission(commandBuffer: commandBuffer, finalBuffer: last, executable: executable,
+                inputs: inputs, outputs: independent, completion: completion, bytes: bytes))
+            pendingBytes += bytes
+            commandBuffers += 1
+            maximumInFlightStages = max(maximumInFlightStages, pending.count)
+            return independent
+        }
+    }
     // A requested value may serve several derivatives. Compile its storage
     // once, then reconstruct each requested slot from the stable index map.
     private static func uniqueTargets(_ targets: [MPSGraphTensor]) -> [MPSGraphTensor] {
@@ -1615,8 +1940,16 @@ enum NativeGraphExecution {
         let entry: NativeGraphPackageCache.Entry
         if let existing = packages.entry(for: key) { entry = existing }
         else {
+            // A cold compiler can allocate its own large workspace. Join the
+            // preceding stage before allowing those two arenas to overlap.
+            // Cached code retains asynchronous steady-state submission.
+            try packages.stream.finish()
+            try checkCancellation()
+            let started = ProcessInfo.processInfo.systemUptime
             if let compile { entry = try compile() }
             else { entry = try autoreleasepool { try compilePackage(graph, feeds: feeds, targets: targets, key: key, packages: packages) } }
+            packages.statistics.compilations += 1
+            packages.statistics.compilationSeconds += ProcessInfo.processInfo.systemUptime - started
         }
         // A synchronous compiler cannot be interrupted. Honor Abort before
         // its completed package can start another allocation or GPU run.
@@ -1633,10 +1966,16 @@ enum NativeGraphExecution {
             }
             return data
         }
+        let inputBytes = inputs.reduce(UInt64(0)) { $0 + UInt64($1.shape.reduce(4) { $0 * $1.intValue }) }
+        let outputBytes = entry.outputShapes.reduce(UInt64(0)) { $0 + UInt64($1.reduce(4, *)) }
+        let reservation = max(UInt64(64 * 1_048_576), (inputBytes + outputBytes) * 4)
+        try packages.stream.prepare(bytes: reservation)
         guard UInt64(device.currentAllocatedSize) <= MachineResources.current.maximumTrainingBytes else {
             throw StudioError("Native training exceeded this Mac's safe Metal working budget; stopped before another stage allocation.")
         }
+        let loadStarted = ProcessInfo.processInfo.systemUptime
         let executable = MPSGraphExecutable(package: entry.url, descriptor: compilationDescriptor())
+        packages.statistics.packageLoadSeconds += ProcessInfo.processInfo.systemUptime - loadStarted
         try Task.checkCancellation()
         try checkCancellation()
         // Package executables need not expose tensor identities. Reconstruct
@@ -1658,9 +1997,13 @@ enum NativeGraphExecution {
         guard outputShapes.allSatisfy({ $0 != nil }), outputTypes.allSatisfy({ $0 != nil }) else {
             throw StudioError("Native compiled program omitted output storage metadata for \(key).")
         }
+        let executionStarted = ProcessInfo.processInfo.systemUptime
         let results = try runWithCompactOutputs(executable, inputs: inputs, shapes: outputShapes.map { $0! },
                                                 types: outputTypes.map { $0! }, device: device, queue: queue,
+                                                stream: packages.stream,
                                                 checkCancellation: checkCancellation)
+        packages.statistics.stages += 1
+        packages.statistics.executionSeconds += ProcessInfo.processInfo.systemUptime - executionStarted
         let requested = try entry.requestedIndices.enumerated().map { index, compiledIndex -> MPSGraphTensorData in
             guard results.indices.contains(compiledIndex) else { throw StudioError("Native compiled program returned incomplete results.") }
             let result = results[compiledIndex]
@@ -1702,6 +2045,9 @@ enum NativeGraphExecution {
         let descriptor = MPSGraphCompilationDescriptor()
         descriptor.reducedPrecisionFastMath = .none
         descriptor.optimizationLevel = .level0
+        // Keep public tensors in NCHW while permitting the GPU compiler to
+        // choose channels-last convolution kernels on supported systems.
+        if #available(macOS 26.4, *) { descriptor.convertLayoutToNHWC() }
         descriptor.waitForCompilationCompletion = true
         return descriptor
     }
@@ -1710,10 +2056,15 @@ enum NativeGraphExecution {
     /// every whole-grid result while that arena is still alive.
     private static func runWithCompactOutputs(_ executable: MPSGraphExecutable, inputs: [MPSGraphTensorData],
                                               shapes: [[Int]], types: [MPSDataType], device: MTLDevice,
-                                              queue: MTLCommandQueue, checkCancellation: () throws -> Void) throws -> [MPSGraphTensorData] {
+                                              queue: MTLCommandQueue, stream: Stream? = nil,
+                                              checkCancellation: () throws -> Void) throws -> [MPSGraphTensorData] {
         try Task.checkCancellation()
         try checkCancellation()
         guard shapes.count == types.count else { throw StudioError("Native graph output metadata is incomplete.") }
+        let inputBytes = inputs.reduce(UInt64(0)) { $0 + UInt64($1.shape.reduce(4) { $0 * $1.intValue }) }
+        let outputBytes = shapes.reduce(UInt64(0)) { $0 + UInt64($1.reduce(4, *)) }
+        let overlapBytes = max(UInt64(64 * 1_048_576), (inputBytes + outputBytes) * 4)
+        try stream?.prepare(bytes: overlapBytes)
         let buffers = try zip(shapes, types).map { shape, type -> MTLBuffer in
             try checkCancellation()
             guard type == .float32 else { throw StudioError("Native graph results must remain Float32.") }
@@ -1728,6 +2079,11 @@ enum NativeGraphExecution {
             return buffer
         }
         let provided = buffers.enumerated().map { MPSGraphTensorData($0.element, shape: shapes[$0.offset].ns, dataType: types[$0.offset]) }
+        if let stream {
+            try checkCancellation()
+            return try stream.encode(executable, inputs: inputs, provided: provided, buffers: buffers,
+                shapes: shapes, types: types, bytes: overlapBytes)
+        }
         let descriptor = MPSGraphExecutableExecutionDescriptor()
         descriptor.waitUntilCompleted = true
         executable.options = .synchronizeResults
@@ -1767,6 +2123,7 @@ enum NativeGraphExecution {
     /// Returns compact, independent buffers: MPSGraph results can be views of
     /// its entire scratch arena, which must not survive with a boundary tensor.
     static func runData(_ graph: MPSGraph, feeds: [MPSGraphTensor: MPSGraphTensorData], targets: [MPSGraphTensor], cache: inout [String: MPSGraphExecutable],
+                        stream: Stream? = nil,
                         checkCancellation: () throws -> Void = { try Task.checkCancellation() }) throws -> [MPSGraphTensorData] {
         try Task.checkCancellation()
         try checkCancellation()
@@ -1806,6 +2163,7 @@ enum NativeGraphExecution {
         }
         let result = try runWithCompactOutputs(executable, inputs: executionInputs, shapes: compiledTargets.map { $0.shape!.map(\.intValue) },
                                                types: compiledTargets.map(\.dataType), device: device, queue: queue,
+                                               stream: stream,
                                                checkCancellation: checkCancellation)
         var byTensor: [MPSGraphTensor: MPSGraphTensorData] = [:]
         for (index, tensor) in compiledTargets.enumerated() { byTensor[tensor] = result[index] }
