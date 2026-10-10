@@ -58,6 +58,18 @@ struct TrainingProgressView: View {
                 Text("Last step loss: \(loss.formatted(.number.precision(.significantDigits(4))))")
                     .font(.caption).foregroundStyle(.secondary).monospacedDigit()
             }
+            HStack(spacing: 12) {
+                if let seconds = progress.lastUpdateSeconds {
+                    Text("Last step: \(Duration.seconds(seconds).formatted(.time(pattern: .minuteSecond)))")
+                }
+                if let rate = progress.learningRate {
+                    Text("Learning rate: \(rate.formatted(.number.precision(.significantDigits(4))))")
+                }
+            }.font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            if progress.accumulationStep > 0, progress.gradientAccumulationSteps > 1 {
+                Text("Accumulating map \(progress.accumulationStep) / \(progress.gradientAccumulationSteps) for this step")
+                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            }
             if progress.initialStep > 0 {
                 Text("Checkpoint step \(progress.checkpointStep.formatted()) · started from \(progress.initialStep.formatted())")
                     .font(.caption).foregroundStyle(.secondary).monospacedDigit()

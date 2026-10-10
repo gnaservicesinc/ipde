@@ -5,6 +5,30 @@ import XCTest
 @testable import TextureStudio
 
 final class NativeMaterialModelTests: XCTestCase {
+    func testRawAdapterGradientsMatchLegacyAdamUpdateWithoutMutatingWeights() async throws {
+        try XCTSkipIf(MTLCreateSystemDefaultDevice() == nil)
+        try await Task.detached {
+            let model = try NativeMaterialModelFixture().model(adapter: true)
+            let rgb = (0..<3 * 64 * 64).map { Float($0 % 97) / 97 }
+            let reference = [Float](repeating: 0.3, count: 64 * 64)
+            let program = try model.program(width: 64, height: 64, target: "height")
+            let before = model.adapterWeights
+            let raw = try program.execute(rgb: rgb, adapters: before, reference: reference, gradientsOnly: true)
+            XCTAssertEqual(Set(raw.gradients.keys), Set(before.keys))
+            XCTAssertTrue(raw.updated.isEmpty); XCTAssertTrue(raw.optimizerState.isEmpty)
+            for name in before.keys { XCTAssertEqual(before[name]!.bytes, model.adapterWeights[name]!.bytes) }
+            let native = try NativeMaterialOptimizer.apply(gradients: raw.gradients, weights: before, state: [:],
+                learningRate: 1e-3, step: 1, configuration: .init())
+            let legacy = try program.execute(rgb: rgb, adapters: before, reference: reference, learningRate: 1e-3)
+            XCTAssertEqual(raw.loss!, legacy.loss!, accuracy: 1e-6)
+            for name in native.weights.keys {
+                for (current, expected) in zip(try native.weights[name]!.floatValues(), try legacy.updated[name]!.floatValues()) {
+                    XCTAssertEqual(current, expected, accuracy: 2e-6)
+                }
+            }
+        }.value
+    }
+
     func testGraphResultCompactionPreservesStridedLogicalOrderAndFloat32Bits() async throws {
         try XCTSkipIf(MTLCreateSystemDefaultDevice() == nil)
         try await Task.detached {
@@ -241,6 +265,18 @@ final class NativeMaterialModelTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(broadBytes, UInt64(3 * 1_073_741_824))
         XCTAssertNoThrow(try NativeMaterialTrainer.admitTraining(model: focused, size: 1024, budget: focusedBytes))
         XCTAssertThrowsError(try NativeMaterialTrainer.admitTraining(model: broad, size: 1024, budget: broadBytes - 1))
+    }
+
+    func testFrozenBlocksUseFewerStagesWhileAdaptedDecoderKeepsItsCuts() throws {
+        let fixture = NativeMaterialModelFixture()
+        let focused = try fixture.model(scope: "final-map", rank: 8, alpha: 8)
+        let decoder = try fixture.model(scope: "map-decoder", rank: 8, alpha: 8)
+        let focusedProgram = try NativeMaterialModel.Program(model: focused, width: 64, height: 64, target: "height")
+        let decoderProgram = try NativeMaterialModel.Program(model: decoder, width: 64, height: 64, target: "height")
+        XCTAssertLessThan(focusedProgram.frozenStageCount, 150,
+            "Frozen generator blocks should need one forward package each, not cuts for each normalization and activation.")
+        XCTAssertGreaterThan(decoderProgram.frozenStageCount, focusedProgram.frozenStageCount + 60,
+            "An adapted decoder and all downstream derivative paths must keep their bounded backward cuts.")
     }
 
     func testStagedMetadataRebuildsAfterEntryAndForwardCancellation() async throws {

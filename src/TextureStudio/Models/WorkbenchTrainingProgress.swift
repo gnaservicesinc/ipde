@@ -28,6 +28,10 @@ struct WorkbenchTrainingProgress: Equatable, Sendable {
     var stageCompleted = 0
     var stageTotal = 0
     var elapsedSeconds = 0.0
+    var lastUpdateSeconds: Double?
+    var learningRate: Double?
+    var accumulationStep = 0
+    var gradientAccumulationSteps = 1
     var lastLoss: Double?
     var validationError: Double?
 
@@ -63,6 +67,9 @@ struct WorkbenchTrainingProgress: Equatable, Sendable {
         if let value = event["epoch"] as? Int, value >= 0 { epoch = value }
         if let value = event["total_epochs"] as? Int ?? event["updates_per_map"] as? Int, value >= 0 { totalEpochs = value }
         if let value = event["elapsed_training_seconds"] as? Double, value.isFinite, value >= 0 { elapsedSeconds = value }
+        if let value = event["learning_rate"] as? Double, value.isFinite, value >= 0 { learningRate = value }
+        if let value = event["gradient_accumulation_steps"] as? Int, value > 0 { gradientAccumulationSteps = value }
+        if let value = event["accumulation_step"] as? Int, value >= 0 { accumulationStep = value }
         if let value = event["workflow_phase"] as? Int, (1...phaseCount).contains(value) { phaseIndex = value }
 
         switch kind {
@@ -88,6 +95,10 @@ struct WorkbenchTrainingProgress: Equatable, Sendable {
             operationLabel = event["operation"] as? String ?? "Starting optimizer update"
             operationDetail = ""; stageCompleted = 0; stageTotal = 0
             setSample(event)
+        case "accumulation_sample":
+            state = .training
+            operationLabel = event["operation"] as? String ?? "Accumulating gradients"
+            setSample(event)
         case "operation_progress":
             operationLabel = event["operation"] as? String ?? operationLabel
             if event["phase"] as? String == "training" { state = .training }
@@ -108,6 +119,10 @@ struct WorkbenchTrainingProgress: Equatable, Sendable {
             state = .training
             operationLabel = "Optimizer update completed"; stageCompleted = 0; stageTotal = 0
             lastLoss = event["total"] as? Double
+            if let seconds = event["update_duration_seconds"] as? Double, seconds.isFinite, seconds >= 0 {
+                lastUpdateSeconds = seconds
+            }
+            accumulationStep = 0
         case "validation_started", "validation_sample":
             state = .validation
             switch event["context"] as? String {

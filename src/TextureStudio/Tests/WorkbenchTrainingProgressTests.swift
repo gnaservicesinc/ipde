@@ -2,6 +2,27 @@ import XCTest
 @testable import TextureStudio
 
 final class WorkbenchTrainingProgressTests: XCTestCase {
+    func testUpdateTimingAndAccumulationAreIndependentOfOptimizerStepCount() {
+        var progress = WorkbenchTrainingProgress()
+        progress.consume(["event": "training_started", "gradient_accumulation_steps": 4, "learning_rate": 0.00001])
+        progress.consume(["event": "update_started", "completed_updates": 2, "current_update": 3])
+        progress.consume(["event": "accumulation_sample", "accumulation_step": 2, "gradient_accumulation_steps": 4, "sample_id": "stone"])
+        XCTAssertEqual(progress.completedUpdates, 2)
+        XCTAssertEqual(progress.currentUpdate, 3)
+        XCTAssertEqual(progress.accumulationStep, 2)
+        XCTAssertEqual(progress.gradientAccumulationSteps, 4)
+        XCTAssertEqual(progress.sampleID, "stone")
+        progress.consume(["event": "update", "completed_updates": 3, "current_update": 3,
+            "learning_rate": 0.000002, "update_duration_seconds": 75.4])
+        XCTAssertEqual(progress.completedUpdates, 3)
+        XCTAssertEqual(progress.accumulationStep, 0)
+        XCTAssertEqual(progress.lastUpdateSeconds, 75.4)
+        XCTAssertEqual(progress.learningRate, 0.000002)
+        progress.consume(["event": "update", "update_duration_seconds": Double.nan, "learning_rate": Double.infinity])
+        XCTAssertEqual(progress.lastUpdateSeconds, 75.4)
+        XCTAssertEqual(progress.learningRate, 0.000002)
+    }
+
     func testSetupTrainingValidationAndSavingKeepSeparateCounters() throws {
         var progress = WorkbenchTrainingProgress()
         progress.consume(["event": "preparation_progress", "completed": 2, "total": 6])

@@ -14,8 +14,8 @@ final class NativeMaterialTrainingControl: @unchecked Sendable {
 }
 
 /// Native whole-grid Float32 material training. MPSGraph differentiates the
-/// recorded LoRA factors and performs clipping/Adam; Swift owns dataset locks,
-/// iteration, validation and bit-preserving safetensors checkpoint publication.
+/// recorded LoRA factors; Swift owns averaging and Adam/AdamW updates, dataset
+/// locks, iteration, validation and bit-preserving checkpoint publication.
 enum NativeMaterialTrainer {
     typealias Event = @Sendable (String) -> Void
     static func run(arguments: [String], onEvent: @escaping Event = { _ in }, control: NativeMaterialTrainingControl = .init()) async throws -> String {
@@ -33,6 +33,9 @@ enum NativeMaterialTrainer {
         let dataset: URL?, output: URL, image: URL?, checkpoint: URL?, expectedSHA256: String?, base: URL
         let size: Int, rank: Int, updatesPerMap: Int, validationEvery: Int, checkpointEvery: Int
         let alpha: Float, learningRate: Float, maxMinutes: Double
+        let gradientAccumulationSteps: Int, warmupUpdates: Int
+        let learningRateSchedule: String, minimumLearningRateRatio: Float
+        let optimizerConfiguration: NativeMaterialOptimizerConfiguration
         let seed: UInt64, materials: [String], inputEncoding: String, baseline: Bool, developerMode: Bool
         init(_ arguments: [String]) throws {
             guard let command = arguments.first, ["train", "refine", "infer"].contains(command) else { throw StudioError("Unsupported native material operation.") }
@@ -60,18 +63,63 @@ enum NativeMaterialTrainer {
             rank = Int(value("--lora-rank") ?? "8") ?? 0
             alpha = Float(value("--lora-alpha") ?? "8") ?? .nan
             learningRate = Float(value("--learning-rate") ?? "0.00001") ?? .nan
+            gradientAccumulationSteps = Int(value("--gradient-accumulation-steps") ?? "1") ?? 0
+            warmupUpdates = Int(value("--warmup-updates") ?? "0") ?? -1
+            learningRateSchedule = value("--learning-rate-schedule") ?? "constant"
+            let minimumRatio = Double(value("--minimum-learning-rate-ratio") ?? "0.1") ?? .nan
+            minimumLearningRateRatio = minimumRatio <= 1 ? Float(minimumRatio) : .nan
+            func nonnegative(_ flag: String, default fallback: Double) -> Float {
+                guard let parsed = Double(value(flag) ?? String(fallback)), parsed.isFinite, parsed >= 0,
+                      parsed == 0 || Float(parsed) > 0 else { return .nan }
+                return Float(parsed)
+            }
+            optimizerConfiguration = .init(algorithm: value("--optimizer") ?? "adamw",
+                beta1: nonnegative("--optimizer-beta1", default: 0.9),
+                beta2: nonnegative("--optimizer-beta2", default: 0.999),
+                epsilon: nonnegative("--optimizer-epsilon", default: 1e-8),
+                weightDecay: nonnegative("--weight-decay", default: 0),
+                maxGradientNorm: nonnegative("--max-gradient-norm", default: 1))
             updatesPerMap = Int(value("--updates-per-map") ?? "100") ?? 0
             maxMinutes = Double(value("--max-minutes") ?? "30") ?? .nan
             validationEvery = Int(value("--validation-every") ?? "20") ?? -1
             checkpointEvery = Int(value("--checkpoint-every") ?? "0") ?? -1
-            seed = UInt64(value("--seed") ?? "17") ?? 17
+            guard let parsedSeed = UInt64(value("--seed") ?? "17") else { throw StudioError("The training seed must be a nonnegative 64-bit integer.") }
+            seed = parsedSeed
             materials = arguments.indices.filter { arguments[$0] == "--material" && arguments.indices.contains($0 + 1) }.map { arguments[$0 + 1] }
             inputEncoding = value("--input-encoding") ?? "srgb"
             baseline = arguments.contains("--baseline"); developerMode = arguments.contains("--developer-mode")
             guard size >= 256, size <= 8192, size % 64 == 0, rank > 0, alpha.isFinite, alpha > 0,
                   learningRate.isFinite, learningRate > 0, updatesPerMap > 0, maxMinutes.isFinite, maxMinutes > 0,
                   validationEvery >= 0, checkpointEvery >= 0 else { throw StudioError("Material training sizes, rates and update counts are invalid.") }
+            guard gradientAccumulationSteps > 0, warmupUpdates >= 0, optimizerConfiguration.isValid,
+                  ["constant", "cosine"].contains(learningRateSchedule), minimumLearningRateRatio.isFinite,
+                  minimumLearningRateRatio > 0, minimumLearningRateRatio <= 1 else { throw StudioError("Material optimizer, gradient accumulation or learning rate schedule values are invalid.") }
             guard command == "infer" ? image != nil : dataset != nil else { throw StudioError("The native material operation needs its input image or dataset.") }
+        }
+
+        func effectiveLearningRate(update: Int, totalUpdates: Int) -> Float {
+            let multiplier: Double
+            if warmupUpdates > 0, update <= warmupUpdates {
+                multiplier = Double(update) / Double(warmupUpdates)
+            } else if learningRateSchedule == "cosine", totalUpdates > warmupUpdates, totalUpdates - warmupUpdates > 1 {
+                let progress = min(1, max(0, Double(update - warmupUpdates - 1) / Double(totalUpdates - warmupUpdates - 1)))
+                let floor = Double(minimumLearningRateRatio)
+                multiplier = floor + (1 - floor) * (1 + cos(.pi * progress)) / 2
+            } else { multiplier = 1 }
+            return max(Float.leastNonzeroMagnitude, Float(Double(learningRate) * multiplier))
+        }
+
+        var trainingConfiguration: [String: Any] {
+            optimizerConfiguration.metadata.merging([
+                "learning_rate": learningRate, "gradient_accumulation_steps": gradientAccumulationSteps,
+                "microbatch_size": 1, "effective_batch_size": gradientAccumulationSteps,
+                "learning_rate_schedule": learningRateSchedule, "minimum_learning_rate_ratio": minimumLearningRateRatio,
+                "minimum_learning_rate": max(Float.leastNonzeroMagnitude, learningRate * minimumLearningRateRatio),
+                "warmup_updates": warmupUpdates, "seed": seed, "precision": "Float32",
+                "value_loss_weight": 1, "detail_loss_weight": 4,
+                "optimizer_state_restored": false,
+                "gradient_accumulation_policy": "Average gradients over evaluated maps, then clip once and apply one optimizer update; stop-and-save and the deadline flush a partial group."
+            ]) { _, new in new }
         }
     }
     private static func infer(_ options: Options, control: NativeMaterialTrainingControl) throws -> String {
@@ -137,6 +185,9 @@ enum NativeMaterialTrainer {
         let requested = training.count.multipliedReportingOverflow(by: options.updatesPerMap)
         guard !requested.overflow else { throw StudioError("The requested training update count is too large.") }
         let requestedUpdates = requested.partialValue
+        guard !requestedUpdates.multipliedReportingOverflow(by: options.gradientAccumulationSteps).overflow else {
+            throw StudioError("The requested accumulated map evaluation count is too large.")
+        }
         let sourceHash = checksum(manifestBytes)
         guard checksum(try Data(contentsOf: dataset.appendingPathComponent("dataset.json"))) == sourceHash else {
             throw StudioError("The prepared dataset changed before native training obtained its read locks.")
@@ -145,6 +196,25 @@ enum NativeMaterialTrainer {
         let model = try suppliedModel ?? NativeMaterialModel.load(checkpointURL: options.checkpoint, expectedSHA256: options.expectedSHA256,
             baseURL: options.base, target: options.target, scope: options.scope, rank: options.rank, alpha: options.alpha, training: true, seed: options.seed)
         if let name = options.modelName { model.configuration["model_name"] = name }
+        var effectiveConfiguration = options.trainingConfiguration
+        effectiveConfiguration["training_size"] = options.size
+        effectiveConfiguration["updates_per_map"] = options.updatesPerMap
+        effectiveConfiguration["validation_every"] = options.validationEvery
+        effectiveConfiguration["checkpoint_every"] = options.checkpointEvery
+        effectiveConfiguration["max_minutes"] = options.maxMinutes
+        effectiveConfiguration["target"] = options.target
+        effectiveConfiguration["scope"] = options.scope
+        effectiveConfiguration["dataset_manifest_sha256"] = sourceHash
+        effectiveConfiguration["material_filter"] = options.materials
+        effectiveConfiguration["requested_updates"] = requestedUpdates
+        effectiveConfiguration["training_map_count"] = training.count
+        effectiveConfiguration["validation_map_count"] = validation.count
+        effectiveConfiguration["validation_enabled"] = validationEnabled
+        effectiveConfiguration["quick_validation_count"] = quickCount
+        effectiveConfiguration["initial_step"] = model.configuration["step"] as? Int ?? 0
+        effectiveConfiguration["scheduling_step_origin"] = "current_run"
+        effectiveConfiguration["lora_layers"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(model.layers))
+        model.configuration["training_configuration"] = effectiveConfiguration
         try admitTraining(model: model, size: options.size)
         try setup("Preparing model execution graph", step: 3)
         let program = try model.program(width: options.size, height: options.size, target: options.target)
@@ -153,6 +223,8 @@ enum NativeMaterialTrainer {
         try FileManager.default.createDirectory(at: options.output, withIntermediateDirectories: true)
         let started = now()
         var completed = 0, random = NativeMaterialRandom(seed: options.seed)
+        var accumulationRandom = NativeMaterialRandom(seed: options.seed ^ 0x9e3779b97f4a7c15)
+        var sampleEvaluations = 0, accumulationOrder: [Int] = [], accumulationPosition = 0
         var currentEpoch = 0, activeUpdate = false, workflowPhase = 3
         let initialStep = model.configuration["step"] as? Int ?? 0
         var optimizer: [String: NativeTensor] = [:], checkpoints: [[String: Any]] = [], history: [[String: Any]] = []
@@ -172,6 +244,8 @@ enum NativeMaterialTrainer {
             var event = event
             event["elapsed_training_seconds"] = elapsedSeconds()
             event["completed_updates"] = completed
+            event["sample_evaluations"] = sampleEvaluations
+            event["gradient_accumulation_steps"] = options.gradientAccumulationSteps
             event["requested_updates"] = requestedUpdates
             event["current_update"] = activeUpdate ? completed + 1 : completed
             event["initial_step"] = initialStep
@@ -252,6 +326,7 @@ enum NativeMaterialTrainer {
                 "execution": "bounded-native-stages-v1", "stage_count": program.frozenStageCount,
                 "requested_updates": requestedUpdates, "updates_per_map": options.updatesPerMap,
                 "training_map_count": training.count, "validation_map_count": validation.count,
+                "training_configuration": effectiveConfiguration,
                 "quick_count": quickCount, "validation_every": options.validationEvery, "max_minutes": options.maxMinutes])
             let baseline = try check(full: true, context: "baseline")
             for epoch in 0..<options.updatesPerMap {
@@ -267,25 +342,55 @@ enum NativeMaterialTrainer {
                     try emit(["event": "update_started", "sample_id": sample.id, "sample_position": position + 1,
                         "sample_total": training.count, "operation": "Loading training maps"])
                     let updateStarted = now()
-                    let update = try autoreleasepool {
-                        let data = try pair(sample)
-                        return try program.execute(rgb: data.0, adapters: model.adapterWeights, reference: data.1,
-                            learningRate: options.learningRate, step: completed + 1, optimizerState: optimizer,
-                            featureKey: sample.inputSHA256 + ":" + sample.inputEncoding, checkCancellation: { try control.check() }, onStage: { done, total in
+                    var accumulated = NativeMaterialGradientAccumulator()
+                    var valueLoss = Double(0), detailLoss = Double(0), totalLoss = Double(0)
+                    let rate = options.effectiveLearningRate(update: completed + 1, totalUpdates: requestedUpdates)
+                    for microbatch in 0..<options.gradientAccumulationSteps {
+                        let accumulatedSample: NativeMaterialDatasetService.TrainingSample
+                        if microbatch == 0 { accumulatedSample = sample }
+                        else {
+                            if accumulationPosition == accumulationOrder.count {
+                                accumulationOrder = Array(training.indices); accumulationRandom.shuffle(&accumulationOrder)
+                                accumulationPosition = 0
+                            }
+                            accumulatedSample = training[accumulationOrder[accumulationPosition]]
+                            accumulationPosition += 1
+                        }
+                        try emit(["event": "accumulation_sample", "sample_id": accumulatedSample.id,
+                            "accumulation_step": microbatch + 1, "learning_rate": rate,
+                            "operation": "Accumulating map gradients"])
+                        let derivative = try autoreleasepool {
+                            let data = try pair(accumulatedSample)
+                            return try program.execute(rgb: data.0, adapters: model.adapterWeights, reference: data.1,
+                            gradientsOnly: true,
+                            featureKey: accumulatedSample.inputSHA256 + ":" + accumulatedSample.inputEncoding, checkCancellation: { try control.check() }, onStage: { done, total in
                                 if done == 1 || done % 10 == 0 || done == total {
-                                    try? emit(["event": "feature_progress", "phase": "training", "sample_id": sample.id, "completed": done, "total": total])
+                                    try? emit(["event": "feature_progress", "phase": "training", "sample_id": accumulatedSample.id, "completed": done, "total": total,
+                                        "accumulation_step": microbatch + 1])
                                 }
                             }, onOperation: { operation, done, total in
                                 try? emit(["event": "operation_progress", "phase": "training", "operation": operation,
-                                    "completed": done, "total": total])
+                                    "completed": done, "total": total, "accumulation_step": microbatch + 1])
                             })
+                        }
+                        try accumulated.add(derivative.gradients)
+                        valueLoss += Double(derivative.valueLoss!); detailLoss += Double(derivative.gradientLoss!); totalLoss += Double(derivative.loss!)
+                        sampleEvaluations += 1
+                        try control.check()
+                        if control.shouldStopAndSave || timeLimitReached() { break }
                     }
                     try control.check()
-                    model.updateAdapters(update.updated); optimizer = update.optimizerState
+                    try emit(["event": "operation_progress", "phase": "training", "operation": "Applying optimizer update", "completed": 0, "total": 1])
+                    let update = try NativeMaterialOptimizer.apply(gradients: accumulated.averaged(), weights: model.adapterWeights,
+                        state: optimizer, learningRate: rate, step: completed + 1, configuration: options.optimizerConfiguration)
+                    try control.check()
+                    model.updateAdapters(update.weights); optimizer = update.state
+                    try emit(["event": "operation_progress", "phase": "training", "operation": "Applying optimizer update", "completed": 1, "total": 1])
                     completed += 1
                     activeUpdate = false
                     try emit(["event": "update", "step": initialStep + completed, "sample_id": sample.id,
-                        "value_l1": update.valueLoss!, "detail_l1": update.gradientLoss!, "total": update.loss!,
+                        "value_l1": valueLoss / Double(accumulated.count), "detail_l1": detailLoss / Double(accumulated.count), "total": totalLoss / Double(accumulated.count),
+                        "learning_rate": rate, "accumulated_samples": accumulated.count, "gradient_norm": update.gradientNorm,
                         "native_dimensions": [options.size, options.size],
                         "update_duration_seconds": seconds(updateStarted.duration(to: now()))])
                     if control.shouldStopAndSave || timeLimitReached() { break }
@@ -318,6 +423,7 @@ enum NativeMaterialTrainer {
                 "checkpoint_path": export.appendingPathComponent(options.developerMode ? "model.safetensors" : "adapter.safetensors").path,
                 "package_path": export.path, "completed_updates": completed, "training_performed": completed > 0,
                 "requested_updates": requestedUpdates, "updates_per_map": options.updatesPerMap,
+                "training_configuration": effectiveConfiguration, "sample_evaluations": sampleEvaluations,
                 "max_minutes": options.maxMinutes, "elapsed_training_seconds": elapsedSeconds(),
                 "time_limit_policy": "Do not start an update after the deadline. The clock starts after setup; baseline validation, an active update, and final validation and saving finish before returning.",
                 "baseline_validation": baseline, "final_validation": lastValidation, "validation_history": history,
@@ -333,6 +439,7 @@ enum NativeMaterialTrainer {
             if error is CancellationError, let ownedExport { try? FileManager.default.removeItem(at: ownedExport) }
             var failure: [String: Any] = ["status": error is CancellationError ? "aborted" : "failed", "completed_updates": completed,
                 "requested_updates": requestedUpdates, "max_minutes": options.maxMinutes,
+                "training_configuration": effectiveConfiguration, "sample_evaluations": sampleEvaluations,
                 "elapsed_training_seconds": elapsedSeconds(), "error": error.localizedDescription,
                 "training_performed": completed > 0]
             if let name = options.modelName { failure["model_name"] = name }

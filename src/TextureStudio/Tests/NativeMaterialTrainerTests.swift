@@ -5,6 +5,71 @@ import XCTest
 @testable import TextureStudio
 
 final class NativeMaterialTrainerTests: XCTestCase {
+    func testAccumulationKeepsOptimizerStepPlanAndRecordsEffectiveCheckpointConfiguration() async throws {
+        try XCTSkipIf(MTLCreateSystemDefaultDevice() == nil)
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let dataset = root.appendingPathComponent("dataset")
+        try datasetFixture(dataset, validationEnabled: false)
+        var finalFactors: [[String: NativeTensor]] = []
+        for accumulation in [1, 3] {
+            let model = try trainerModel(), events = Recorder()
+            let output = root.appendingPathComponent("trained-\(accumulation)")
+            let options = try NativeMaterialTrainer.Options(["train", "--dataset", dataset.path, "--output", output.path,
+                "--size", "256", "--updates-per-map", "2", "--gradient-accumulation-steps", String(accumulation),
+                "--optimizer", "adamw", "--learning-rate", "0.001", "--weight-decay", "0.01",
+                "--optimizer-beta1", "0.8", "--optimizer-beta2", "0.99", "--optimizer-epsilon", "0.0000001",
+                "--max-gradient-norm", "0.5", "--seed", "19"])
+            let text = try await Task.detached { try NativeMaterialTrainer.train(options, onEvent: events.append, control: .init(), model: model) }.value
+            let result = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+            XCTAssertEqual(result["requested_updates"] as? Int, 2)
+            XCTAssertEqual(result["completed_updates"] as? Int, 2)
+            XCTAssertEqual(result["sample_evaluations"] as? Int, 2 * accumulation)
+            let updates = events.events.filter { $0["event"] as? String == "update" }
+            XCTAssertEqual(updates.count, 2)
+            XCTAssertTrue(updates.allSatisfy { $0["accumulated_samples"] as? Int == accumulation })
+            let configuration = try NativeMaterialTransfer.object(output.appendingPathComponent("export/config.json"))
+            let effective = try XCTUnwrap(configuration["training_configuration"] as? [String: Any])
+            XCTAssertEqual(effective["optimizer"] as? String, "adamw")
+            XCTAssertEqual(effective["seed"] as? Int, 19)
+            XCTAssertEqual(effective["gradient_accumulation_steps"] as? Int, accumulation)
+            XCTAssertEqual(effective["optimizer_beta1"] as? Double ?? 0, 0.8, accuracy: 1e-6)
+            XCTAssertEqual(effective["weight_decay"] as? Double ?? 0, 0.01, accuracy: 1e-6)
+            XCTAssertEqual(effective["optimizer_state_restored"] as? Bool, false)
+            let checkpoint = try NativeSafetensors(contentsOf: output.appendingPathComponent("checkpoint-step-00000002.safetensors"))
+            let checkpointConfiguration = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try XCTUnwrap(checkpoint.metadata["configuration"]).utf8)) as? [String: Any])
+            XCTAssertNotNil(checkpointConfiguration["training_configuration"])
+            finalFactors.append(model.adapterWeights)
+        }
+        // Three copies of the same pair have the same averaged derivative as
+        // one copy, with weights frozen throughout each accumulation group.
+        for name in finalFactors[0].keys {
+            for (single, accumulated) in zip(try finalFactors[0][name]!.floatValues(), try finalFactors[1][name]!.floatValues()) {
+                XCTAssertEqual(single, accumulated, accuracy: 1e-6)
+            }
+        }
+    }
+
+    func testStopAndSaveFlushesPartialAccumulationUsingActualMapCount() async throws {
+        try XCTSkipIf(MTLCreateSystemDefaultDevice() == nil)
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let dataset = root.appendingPathComponent("dataset"), output = root.appendingPathComponent("trained")
+        try datasetFixture(dataset, validationEnabled: false)
+        let model = try trainerModel(), events = Recorder(), control = NativeMaterialTrainingControl()
+        let options = try NativeMaterialTrainer.Options(["train", "--dataset", dataset.path, "--output", output.path,
+            "--size", "256", "--updates-per-map", "3", "--gradient-accumulation-steps", "4"])
+        let text = try await Task.detached { try NativeMaterialTrainer.train(options, onEvent: { line in
+            events.append(line)
+            if let event = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+               event["event"] as? String == "accumulation_sample", event["accumulation_step"] as? Int == 2 { control.stopAndSave() }
+        }, control: control, model: model) }.value
+        let result = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "stopped")
+        XCTAssertEqual(result["completed_updates"] as? Int, 1)
+        XCTAssertEqual(result["sample_evaluations"] as? Int, 2)
+        XCTAssertEqual(events.events.first { $0["event"] as? String == "update" }?["accumulated_samples"] as? Int, 2)
+        XCTAssertNoThrow(try NativeMaterialPackage.verify(output.appendingPathComponent("export")))
+    }
+
     func testModelNameAcceptsDisplayTextAndRefinementDefaultsToRecordedName() throws {
         let arguments = ["train", "--dataset", "/dataset", "--output", "/output"]
         XCTAssertNil(try NativeMaterialTrainer.Options(arguments).modelName)

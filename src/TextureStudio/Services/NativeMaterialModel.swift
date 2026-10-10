@@ -248,7 +248,7 @@ final class NativeMaterialModel: @unchecked Sendable {
             // Frozen features retain their separate 2 GiB storage limit.
             let workingBytes = NativeMaterialTrainer.estimatedWorkingBytes(model: model, size: max(width, height))
             let spareBytes = capacity > workingBytes ? capacity - workingBytes : 0
-            let defaultCheckpointBytes = min(UInt64(6 * 1_073_741_824), min(capacity / 8, spareBytes / 2))
+            let defaultCheckpointBytes = min(UInt64(12 * 1_073_741_824), min(capacity / 4, spareBytes / 2))
             let checkpointBudget = checkpointByteLimit ?? defaultCheckpointBytes
             self.checkpointByteLimit = checkpointBudget
             let packageCache = try NativeGraphPackageCache()
@@ -263,6 +263,7 @@ final class NativeMaterialModel: @unchecked Sendable {
         }
         func execute(rgb: [Float], adapters: [String: NativeTensor], reference: [Float]? = nil,
                      learningRate: Float? = nil, step: Int = 1, optimizerState: [String: NativeTensor] = [:],
+                     gradientsOnly: Bool = false,
                      featureKey: String? = nil, checkCancellation: () throws -> Void = { try Task.checkCancellation() },
                      onStage: (Int, Int) -> Void = { _, _ in },
                      onOperation: (String, Int, Int) -> Void = { _, _, _ in }) throws -> Execution {
@@ -290,7 +291,7 @@ final class NativeMaterialModel: @unchecked Sendable {
                     }
                     try engine.validateAdapters(adapters)
                     return try engine.execute(rgb: rgb, adapters: adapters, reference: reference, learningRate: learningRate,
-                        step: step, optimizerState: optimizerState, featureKey: featureKey,
+                        step: step, optimizerState: optimizerState, gradientsOnly: gradientsOnly, featureKey: featureKey,
                         checkCancellation: checkCancellation, onStage: onStage, onOperation: onOperation)
                 }
             } catch {
@@ -339,6 +340,8 @@ final class NativeMaterialModel: @unchecked Sendable {
         private var featureCache: [String: [MPSGraphTensor: MPSGraphTensorData]] = [:]
         private var featureOrder: [String] = []
         private var featureBytes: UInt64 = 0
+        private var adapterInfluencedFeeds = Set<MPSGraphTensor>()
+        private var coalescingFrozenBlock = false
         private var finalLayerOnly: Bool {
             !layers.isEmpty && layers.keys.allSatisfy { $0 == "ups.\(["normal": 1, "roughness": 2, "height": 3][target]!).model.10" }
         }
@@ -449,7 +452,7 @@ final class NativeMaterialModel: @unchecked Sendable {
             return result
         }
         private func linearGeluBoundary(_ value: MPSGraphTensor, _ name: String) throws -> MPSGraphTensor {
-            if stagesEnabled, layers[name] != nil {
+            if stagesEnabled, !coalescingFrozenBlock, layers[name] != nil {
                 let preactivation = boundary(try linear(value, name))
                 let index = frozenStages.count
                 let result = boundary(gelu(preactivation))
@@ -459,7 +462,7 @@ final class NativeMaterialModel: @unchecked Sendable {
             let preactivation = try linear(value, name)
             let index = frozenStages.count
             let result = boundary(gelu(preactivation))
-            if stagesEnabled, layers[name] == nil {
+            if stagesEnabled, !coalescingFrozenBlock, layers[name] == nil {
                 immutableLinearGeluStages[index] = ImmutableLinearGelu(input: value, preactivation: preactivation,
                     weights: try tensor(name + ".weight"))
             }
@@ -489,7 +492,7 @@ final class NativeMaterialModel: @unchecked Sendable {
             let grnSource = add(add(weighted, try tensor(prefix + ".grn.beta", shape: [1, 1, 1, channels * 4])), grnInput)
             let grnStage = frozenStages.count
             x = boundary(grnSource)
-            if stagesEnabled { sameShapeResidualOperands[grnStage] = [weighted, grnInput] }
+            if stagesEnabled, !coalescingFrozenBlock { sameShapeResidualOperands[grnStage] = [weighted, grnInput] }
             x = boundary(try linear(x, prefix + ".pwconv2"))
             x = mul(x, try tensor(prefix + ".gamma", shape: [channels]))
             return add(value, permute(x, [0, 3, 1, 2]))
@@ -565,6 +568,28 @@ final class NativeMaterialModel: @unchecked Sendable {
         }
         private func block(_ value: MPSGraphTensor, _ prefix: String, shifted: Bool) throws -> MPSGraphTensor {
             try Task.checkCancellation()
+            // A frozen block needs only its terminal features. Cutting its
+            // normalization, GELU, GRN and attention separately would compile,
+            // reload and synchronize about sixteen packages per block without
+            // saving any backward work. Keep fine cuts on every adapter path
+            // and on grids whose conservative block live set is too large.
+            let parameterDependencies = Set(parameterFeeds.values).union(adapterInfluencedFeeds)
+            let hasActiveInput = !requiredFeeds([value]).isDisjoint(with: parameterDependencies)
+            let hasActiveWeights = layers.keys.contains { $0.hasPrefix(prefix + ".") }
+            let blockBytes = UInt64(shape(value).reduce(4, *))
+            let canCoalesce = stagesEnabled && !hasActiveInput && !hasActiveWeights &&
+                blockBytes <= MachineResources.current.maximumTrainingBytes / 24 / 3
+            if canCoalesce {
+                coalescingFrozenBlock = true
+                let result: MPSGraphTensor
+                do { result = try blockOperations(value, prefix, shifted: shifted) }
+                catch { coalescingFrozenBlock = false; throw error }
+                coalescingFrozenBlock = false
+                return boundary(result)
+            }
+            return try blockOperations(value, prefix, shifted: shifted)
+        }
+        private func blockOperations(_ value: MPSGraphTensor, _ prefix: String, shifted: Bool) throws -> MPSGraphTensor {
             let mixed = boundary(try conv(value, prefix + ".conv1_1", padding: 0)), half = shape(value)[1] / 2
             let convolution = boundary(try convNeXt(slice(mixed, 1, 0, half), prefix + ".conv_block"))
             // Preserve upstream transpose(1,3), including the exchanged H/W.
@@ -666,7 +691,7 @@ final class NativeMaterialModel: @unchecked Sendable {
         // Boundaries retain the complete native grid and exact forward map.
         // Reverse-stage VJPs carry gradients across all adapted boundaries.
         private func boundary(_ value: MPSGraphTensor) -> MPSGraphTensor {
-            if !stagesEnabled { return value }
+            if !stagesEnabled || coalescingFrozenBlock { return value }
             return freeze([value], name: "native_stage_\(frozenStages.count)")[0]
         }
         private func requiredFeeds(_ targets: [MPSGraphTensor]) -> Set<MPSGraphTensor> {
@@ -680,8 +705,12 @@ final class NativeMaterialModel: @unchecked Sendable {
             return targets.reduce(into: Set<MPSGraphTensor>()) { $0.formUnion(visit($1)) }
         }
         private func freeze(_ sources: [MPSGraphTensor], name: String) -> [MPSGraphTensor] {
+            let parameterDependencies = Set(parameterFeeds.values).union(adapterInfluencedFeeds)
             let outputs = sources.enumerated().map { index, source in
                 (source: source, feed: graph.placeholder(shape: source.shape, dataType: .float32, name: "\(name)_\(index)"))
+            }
+            for item in outputs where !requiredFeeds([item.source]).isDisjoint(with: parameterDependencies) {
+                adapterInfluencedFeeds.insert(item.feed)
             }
             frozenStages.append(outputs)
             return outputs.map(\.feed)
@@ -775,26 +804,27 @@ final class NativeMaterialModel: @unchecked Sendable {
             immutableData = data
             return data
         }
-        struct Execution { let output: [Float]; let loss: Float?, valueLoss: Float?, gradientLoss: Float?; let updated: [String: NativeTensor]; let optimizerState: [String: NativeTensor] }
+        struct Execution { let output: [Float]; let loss: Float?, valueLoss: Float?, gradientLoss: Float?; let updated: [String: NativeTensor]; let optimizerState: [String: NativeTensor]; let gradients: [String: NativeTensor] }
         func execute(rgb: [Float], adapters: [String: NativeTensor], reference: [Float]? = nil,
                      learningRate: Float? = nil, step: Int = 1, optimizerState: [String: NativeTensor] = [:],
+                     gradientsOnly: Bool = false,
                      featureKey: String? = nil, checkCancellation: () throws -> Void = { try Task.checkCancellation() },
                      onStage: (Int, Int) -> Void = { _, _ in },
                      onOperation: (String, Int, Int) -> Void = { _, _, _ in }) throws -> Execution {
             try checkCancellation()
             return try autoreleasepool {
                 try executePooled(rgb: rgb, adapters: adapters, reference: reference, learningRate: learningRate,
-                    step: step, optimizerState: optimizerState, featureKey: featureKey,
+                    step: step, optimizerState: optimizerState, gradientsOnly: gradientsOnly, featureKey: featureKey,
                     checkCancellation: checkCancellation, onStage: onStage, onOperation: onOperation)
             }
         }
         private func executePooled(rgb: [Float], adapters: [String: NativeTensor], reference: [Float]?,
-                     learningRate: Float?, step: Int, optimizerState: [String: NativeTensor], featureKey: String?,
+                     learningRate: Float?, step: Int, optimizerState: [String: NativeTensor], gradientsOnly: Bool, featureKey: String?,
                      checkCancellation: () throws -> Void, onStage: (Int, Int) -> Void,
                     onOperation: (String, Int, Int) -> Void) throws -> Execution {
-            if let reference, let learningRate, stagesEnabled {
+            if let reference, stagesEnabled, learningRate != nil || gradientsOnly {
                 return try executeCheckpointed(rgb: rgb, adapters: adapters, reference: reference,
-                    learningRate: learningRate, step: step, optimizerState: optimizerState,
+                    learningRate: learningRate ?? 1, step: step, optimizerState: optimizerState, gradientsOnly: gradientsOnly,
                     featureKey: featureKey, checkCancellation: checkCancellation, onStage: onStage, onOperation: onOperation)
             }
             var feeds = try immutableFeeds()
@@ -807,7 +837,8 @@ final class NativeMaterialModel: @unchecked Sendable {
                 feeds[targetInput!] = try NativeGraphExecution.tensorData(.floats(reference, shape: shape(output)))
                 targets += [loss!, valueLoss!, gradientLoss!]
             }
-            let optimize = reference != nil && learningRate != nil
+            let optimize = reference != nil && learningRate != nil && !gradientsOnly
+            let differentiate = reference != nil && gradientsOnly
             var ordered: [String] = []
             if optimize {
                 try prepareOptimizer()
@@ -821,6 +852,11 @@ final class NativeMaterialModel: @unchecked Sendable {
                 }
                 ordered = optimizerOutputs.keys.sorted()
                 targets += ordered.map { optimizerOutputs[$0]! }
+            }
+            if differentiate {
+                try prepareOptimizer()
+                ordered = gradients.keys.sorted()
+                targets += ordered.map { gradients[$0]! }
             }
             let finalFeeds = requiredFeeds(targets)
             let stageNeeds = frozenStages.map { requiredFeeds($0.map(\.source)) }
@@ -878,7 +914,15 @@ final class NativeMaterialModel: @unchecked Sendable {
                     else { updated[key] = .floats(values, shape: adapters[key]!.shape) }
                 }
             }
-            return Execution(output: result[0], loss: reference == nil ? nil : result[1][0], valueLoss: reference == nil ? nil : result[2][0], gradientLoss: reference == nil ? nil : result[3][0], updated: updated, optimizerState: state)
+            var derivative: [String: NativeTensor] = [:]
+            if differentiate {
+                for (index, name) in ordered.enumerated() {
+                    let values = result[index + 4]
+                    guard values.allSatisfy(\.isFinite) else { throw StudioError("Native adapter gradients are nonfinite.") }
+                    derivative[name] = .floats(values, shape: adapters[name]!.shape)
+                }
+            }
+            return Execution(output: result[0], loss: reference == nil ? nil : result[1][0], valueLoss: reference == nil ? nil : result[2][0], gradientLoss: reference == nil ? nil : result[3][0], updated: updated, optimizerState: state, gradients: derivative)
         }
         private struct ReverseStage {
             let key: String
@@ -1185,7 +1229,7 @@ final class NativeMaterialModel: @unchecked Sendable {
             return save(replayCount(chosen) < replayCount(original) ? chosen : original)
         }
         private func executeCheckpointed(rgb: [Float], adapters: [String: NativeTensor], reference: [Float],
-                    learningRate: Float, step: Int, optimizerState: [String: NativeTensor], featureKey: String?,
+                    learningRate: Float, step: Int, optimizerState: [String: NativeTensor], gradientsOnly: Bool, featureKey: String?,
                     checkCancellation: () throws -> Void, onStage: (Int, Int) -> Void,
                     onOperation: (String, Int, Int) -> Void) throws -> Execution {
             guard learningRate.isFinite, learningRate > 0, reference.count == width * height * (target == "normal" ? 3 : 1),
@@ -1211,7 +1255,7 @@ final class NativeMaterialModel: @unchecked Sendable {
             var frozenValues: [MPSGraphTensor: MPSGraphTensorData] = [:]
             // Keep cuts that reduce replay most within the fixed RAM budget.
             let candidates = frozenStages.flatMap { $0.map(\.feed) }.filter { activeFeatures.contains($0) && backwardNeeds.contains($0) }
-            let checkpointBudget = min(checkpointByteLimit ?? UInt64(2 * 1_073_741_824), MachineResources.current.maximumTrainingBytes / 8)
+            let checkpointBudget = min(checkpointByteLimit ?? UInt64(2 * 1_073_741_824), MachineResources.current.maximumTrainingBytes / 4)
             let anchorSet = try checkpointAnchors(candidates: candidates, budget: checkpointBudget, stageNeeds: stageNeeds,
                 finalNeeds: finalNeeds, frozenRoots: frozenRoots, checkCancellation: checkCancellation)
             var feeds = base
@@ -1368,7 +1412,11 @@ final class NativeMaterialModel: @unchecked Sendable {
                 guard let gradient = parameterGradients[name], try gradient.floatValues().allSatisfy(\.isFinite) else {
                     throw StudioError("Native training returned a missing or nonfinite adapter gradient.")
                 }
-                base[gradients[name]!] = try NativeGraphExecution.tensorData(gradient)
+                if !gradientsOnly { base[gradients[name]!] = try NativeGraphExecution.tensorData(gradient) }
+            }
+            if gradientsOnly {
+                return Execution(output: result[0], loss: result[1][0], valueLoss: result[2][0], gradientLoss: result[3][0],
+                    updated: [:], optimizerState: [:], gradients: parameterGradients)
             }
             base[self.learningRate!] = try NativeGraphExecution.tensorData(.floats([learningRate], shape: []))
             base[optimizerStep!] = try NativeGraphExecution.tensorData(.floats([Float(step)], shape: []))
@@ -1391,7 +1439,7 @@ final class NativeMaterialModel: @unchecked Sendable {
                 if name == key { updated[key] = value } else { state[key] = value }
             }
             try checkCancellation()
-            return Execution(output: result[0], loss: result[1][0], valueLoss: result[2][0], gradientLoss: result[3][0], updated: updated, optimizerState: state)
+            return Execution(output: result[0], loss: result[1][0], valueLoss: result[2][0], gradientLoss: result[3][0], updated: updated, optimizerState: state, gradients: [:])
         }
         private func prepareLoss() throws {
             if targetInput != nil { return }

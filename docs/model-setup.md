@@ -14,4 +14,12 @@ The migration is checked with synthetic complete-operation Metal fixtures, real 
 
 At the pinned revision, the published [base-generator training script](https://github.com/aaf6aa/PBRnxt/blob/73ab49a0cc0de5ea70e7aa94fb1a7234dd59ab35/train.py#L325-L356) uses 128 × 128 random patches. The separate [4× upscaler script](https://github.com/aaf6aa/PBRnxt/blob/73ab49a0cc0de5ea70e7aa94fb1a7234dd59ab35/train_sr.py#L264-L297) uses 192 × 192 targets and 48 × 48 inputs. These published configurations do not establish the complete training history of `pbrnxt_402236.pth`.
 
-The [upstream README](https://github.com/aaf6aa/PBRnxt#showcase) demonstrates 256 × 256 inputs and benchmarks 512 × 512 inputs; it gives no preferred 1K or 2K training resolution. Texture Studio's adaptation omits the original final 4× enlargement. Its best training grid therefore needs held-out material comparisons, including the pixel scale of surface details, rather than assuming an upstream ideal canvas size.
+The [pinned upstream README](https://github.com/aaf6aa/PBRnxt/blob/73ab49a0cc0de5ea70e7aa94fb1a7234dd59ab35/README.md#showcase) demonstrates 256 × 256 inputs and benchmarks 512 × 512 inputs; it gives no preferred 1K or 2K training resolution. Texture Studio's adaptation omits the original final 4× enlargement. Its best training grid therefore needs held-out material comparisons, including the pixel scale of surface details, rather than assuming an upstream ideal canvas size.
+
+## Training configuration
+
+Model Training exposes learning rate, gradient accumulation, AdamW or Adam, weight decay, constant or cosine scheduling, the minimum learning rate ratio, warmup updates, optimizer betas and epsilon, gradient clipping, random seed, LoRA rank and alpha. It remembers these choices and records the effective configuration in checkpoints, exports and run records. Physical batch size is one complete native map; accumulation averages several map gradients before updating the adapter. Larger accumulation increases work per optimizer update.
+
+The native defaults preserve the previous learning rate and update behavior: `1e-5`, accumulation `1`, AdamW with decay `0`, betas `0.9/0.999`, epsilon `1e-8`, maximum gradient norm `1`, a constant schedule and no warmup. AdamW applies weight decay separately from moment estimates when a nonzero decay is selected. See [PyTorch's AdamW algorithm](https://docs.pytorch.org/docs/2.14/generated/torch.optim.AdamW.html).
+
+These are Texture Studio adapter defaults. They do not claim to reproduce the upstream full-generator training recipe, which uses a different optimizer, losses, batch size and precision. See the [training audit](training-audit.md) for the source comparison, fixed choices and performance limits.

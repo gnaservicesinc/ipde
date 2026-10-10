@@ -7,6 +7,7 @@ protocol NumericEditableValue: Comparable, LosslessStringConvertible, Sendable {
 }
 
 extension Int: NumericEditableValue { var isFiniteNumber: Bool { true } }
+extension UInt64: NumericEditableValue { var isFiniteNumber: Bool { true } }
 extension Float: NumericEditableValue { var isFiniteNumber: Bool { isFinite } }
 extension Double: NumericEditableValue { var isFiniteNumber: Bool { isFinite } }
 

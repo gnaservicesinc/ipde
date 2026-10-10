@@ -89,6 +89,18 @@ final class TrainingPreparationTests: XCTestCase {
         try await store.loadDataset(fixture.original)
         store.training.size = 1024
         store.training.modelName = "  石 Stone / Displacement  "
+        store.training.learningRate = 0.0002
+        store.training.gradientAccumulationSteps = 4
+        store.training.optimizer = "adamw"
+        store.training.optimizerBeta1 = 0.85
+        store.training.optimizerBeta2 = 0.98
+        store.training.optimizerEpsilon = 0.0000001
+        store.training.weightDecay = 0.01
+        store.training.maxGradientNorm = 0.5
+        store.training.learningRateSchedule = "cosine"
+        store.training.minimumLearningRateRatio = 0.2
+        store.training.warmupUpdates = 10
+        store.training.seed = 42
         store.startTraining()
         try await settled(store)
         XCTAssertNil(store.error)
@@ -99,6 +111,18 @@ final class TrainingPreparationTests: XCTestCase {
         XCTAssertEqual(value("--size", in: train), "1024")
         XCTAssertEqual(value("--dataset", in: train), fixture.prepared.path)
         XCTAssertEqual(value("--model-name", in: train), "石 Stone / Displacement")
+        XCTAssertEqual(value("--learning-rate", in: train), String(store.training.learningRate))
+        XCTAssertEqual(value("--gradient-accumulation-steps", in: train), "4")
+        XCTAssertEqual(value("--optimizer", in: train), "adamw")
+        XCTAssertEqual(value("--optimizer-beta1", in: train), "0.85")
+        XCTAssertEqual(value("--optimizer-beta2", in: train), "0.98")
+        XCTAssertEqual(value("--optimizer-epsilon", in: train), String(store.training.optimizerEpsilon))
+        XCTAssertEqual(value("--weight-decay", in: train), "0.01")
+        XCTAssertEqual(value("--max-gradient-norm", in: train), "0.5")
+        XCTAssertEqual(value("--learning-rate-schedule", in: train), "cosine")
+        XCTAssertEqual(value("--minimum-learning-rate-ratio", in: train), "0.2")
+        XCTAssertEqual(value("--warmup-updates", in: train), "10")
+        XCTAssertEqual(value("--seed", in: train), "42")
         XCTAssertTrue(value("--output", in: train)?.hasPrefix(fixture.root.path + "/out/material-training/material-height-") == true,
             "Display names never become path components")
         XCTAssertFalse(train.contains("--developer-mode"))

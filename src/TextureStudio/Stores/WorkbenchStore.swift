@@ -630,6 +630,7 @@ final class WorkbenchStore {
     }
 
     var trainingConfigurationIssue: String? {
+        if let issue = training.configurationIssue { return issue }
         if dataset == nil { return "Open your source dataset first." }
         if !supportedTrainingSizes.contains(training.size) {
             if dataset?.supportedTrainingSizes?.contains(training.size) == false { return "Choose a training size supplied by the original source maps." }
@@ -679,7 +680,16 @@ final class WorkbenchStore {
                 "--max-minutes", String(options.maxMinutes),
                 "--updates-per-map", String(options.updatesPerCrop),
                 "--validation-every", String(options.validationEvery), "--checkpoint-every", String(options.checkpointEvery),
-                "--lora-rank", String(options.loraRank), "--lora-alpha", String(options.loraAlpha)] + dependencies
+                "--lora-rank", String(options.loraRank), "--lora-alpha", String(options.loraAlpha),
+                "--learning-rate", String(options.learningRate),
+                "--gradient-accumulation-steps", String(options.gradientAccumulationSteps),
+                "--optimizer", options.optimizer,
+                "--optimizer-beta1", String(options.optimizerBeta1), "--optimizer-beta2", String(options.optimizerBeta2),
+                "--optimizer-epsilon", String(options.optimizerEpsilon), "--weight-decay", String(options.weightDecay),
+                "--max-gradient-norm", String(options.maxGradientNorm),
+                "--learning-rate-schedule", options.learningRateSchedule,
+                "--minimum-learning-rate-ratio", String(options.minimumLearningRateRatio),
+                "--warmup-updates", String(options.warmupUpdates), "--seed", String(options.seed)] + dependencies
             if developer { args += ["--developer-mode"] }
             if options.useSelectedMaterialOnly, let id = selectedMaterial { args += ["--material", id] }
             if let checkpoint { args += ["--checkpoint", checkpoint.checkpointPath, "--expected-sha256", checkpoint.sha256] }

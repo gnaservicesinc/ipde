@@ -47,9 +47,8 @@ struct TrainingWorkbenchView: View {
                     }
                 }.disabled(store.isBusy)
                 Section("Refine a material model") {
-                    TextField("Model name", text: $store.training.modelName, prompt: Text(store.suggestedTrainingModelName))
-                        .accessibilityIdentifier("training.model-name")
-                    Text("Shown in Saved Models and exported with the checkpoint. Leave blank to use the suggested name.")
+                    TrainingModelNameField(name: $store.training.modelName, suggestedName: store.suggestedTrainingModelName)
+                    Text("Shown in Saved Models and exported with the checkpoint. Clear the field to use the suggested name.")
                         .font(.caption).foregroundStyle(.secondary)
                     Picker("Map", selection: Binding(get: { store.training.target }, set: { store.selectTrainingTarget($0) })) {
                         Text("Displacement").tag("height")
@@ -57,13 +56,13 @@ struct TrainingWorkbenchView: View {
                         Text("Normals").tag("normal")
                     }
                     Toggle("Start from selected checkpoint", isOn: $store.training.useWarmStart)
+                    Text("Training scope: \(store.training.scope == "map-decoder" ? "Map decoder and output branch" : "Map output branch")")
+                        .font(.caption).foregroundStyle(.secondary)
                     Button("Choose Starting Checkpoint…") { store.chooseResumeCheckpoint() }
                     if store.training.useWarmStart {
                         if let checkpoint = store.selectedCheckpoint {
                             Text("Starting model: \(checkpoint.title)").font(.caption).textSelection(.enabled)
                             Text(checkpoint.modelSummary)
-                                .font(.caption).foregroundStyle(.secondary)
-                            Text("Refinement scope: \(checkpoint.scope == "map-decoder" ? "Map decoder" : "Final map layer")")
                                 .font(.caption).foregroundStyle(.secondary)
                         } else {
                             Text("Choose a starting checkpoint before training.").font(.caption).foregroundStyle(.secondary)
@@ -75,6 +74,46 @@ struct TrainingWorkbenchView: View {
                         .font(.caption).foregroundStyle(.secondary)
                     if let issue = store.trainingConfigurationIssue {
                         Text(issue).font(.caption).foregroundStyle(.secondary)
+                    }
+                }.disabled(store.isBusy)
+                Section("Training settings") {
+                    NumericField("Learning rate", value: $store.training.learningRate, greaterThan: 0)
+                    Picker("Optimizer", selection: $store.training.optimizer) {
+                        Text("AdamW").tag("adamw")
+                        Text("Adam").tag("adam")
+                    }
+                    NumericField("Gradient accumulation steps", value: $store.training.gradientAccumulationSteps, atLeast: 1, unit: "maps / update")
+                    Text("One complete map is processed at a time. Gradients are averaged before each optimizer update. Increasing accumulation does more work per update.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    NumericField("Weight decay", value: $store.training.weightDecay, atLeast: 0)
+                    Picker("Learning rate schedule", selection: $store.training.learningRateSchedule) {
+                        Text("Constant").tag("constant")
+                        Text("Cosine decay").tag("cosine")
+                    }
+                    if store.training.learningRateSchedule == "cosine" {
+                        NumericField("Minimum learning rate ratio", value: $store.training.minimumLearningRateRatio, in: Double(Float.leastNonzeroMagnitude)...1)
+                        Text("Cosine decay finishes at this fraction of the starting learning rate.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    NumericField("Warmup", value: $store.training.warmupUpdates, atLeast: 0, unit: "updates")
+                    DisclosureGroup("Advanced training settings") {
+                        NumericField("Optimizer beta 1", value: $store.training.optimizerBeta1, in: 0...Double(Float(1).nextDown))
+                        NumericField("Optimizer beta 2", value: $store.training.optimizerBeta2, in: 0...Double(Float(1).nextDown))
+                        NumericField("Optimizer epsilon", value: $store.training.optimizerEpsilon, greaterThan: 0)
+                        NumericField("Maximum gradient norm", value: $store.training.maxGradientNorm, atLeast: 0)
+                        Text("0 disables gradient clipping. Warm starts restore weights and start fresh optimizer moments.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        NumericField("Random seed", value: $store.training.seed, atLeast: 0)
+                        NumericField("LoRA rank", value: $store.training.loraRank, atLeast: 1)
+                            .disabled(store.training.useWarmStart && store.selectedCheckpoint?.schema == "texture-studio-material-lora-v1")
+                        NumericField("LoRA alpha", value: $store.training.loraAlpha, greaterThan: 0)
+                            .disabled(store.training.useWarmStart && store.selectedCheckpoint?.schema == "texture-studio-material-lora-v1")
+                        if store.training.useWarmStart && store.selectedCheckpoint?.schema == "texture-studio-material-lora-v1" {
+                            Text("The starting LoRA retains its recorded rank and alpha. These controls apply to new adapters.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Text("Float32 training. The fixed objective is value L1 + 4 × multiscale detail L1; the selected LoRA layers learn while base weights stay frozen.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                 }.disabled(store.isBusy)
                 Section("Validation & checkpoints") {
@@ -92,10 +131,10 @@ struct TrainingWorkbenchView: View {
                 if developerMode {
                     Section("Developer controls") {
                         Picker("Refinement scope", selection: $store.training.scope) {
-                            Text("Final map layer").tag("final-map")
+                            Text("Map output branch").tag("final-map")
                             Text("Map decoder").tag("map-decoder")
                         }
-                        Text("The final layer makes focused refinements with a small adapter. The map decoder changes more features.")
+                        Text("The output branch refines the selected map's RRDB layers. The map decoder also adapts its decoder and tail, adding backward work and time per step.")
                             .font(.caption).foregroundStyle(.secondary)
                         Toggle("Upload full checkpoint after training", isOn: $store.uploadAfterTraining)
                         Toggle("Public Hugging Face model", isOn: $store.uploadPublic)
@@ -107,8 +146,6 @@ struct TrainingWorkbenchView: View {
                             } ?? "After training: upload when a saved Hugging Face login is available. Set the repository and visibility above.")
                                 .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                         }
-                        NumericField("LoRA rank", value: $store.training.loraRank, atLeast: 1)
-                        NumericField("LoRA alpha", value: $store.training.loraAlpha, greaterThan: 0)
                     }.disabled(store.isBusy)
                 }
             }.formStyle(.grouped).frame(minWidth: 380, idealWidth: 440, maxWidth: 520)
