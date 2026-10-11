@@ -796,9 +796,14 @@ final class NativeMaterialDatasetTests: XCTestCase {
         XCTAssertEqual(try NativePNG.decode(filtered).pixels, Data((0..<90).map { UInt8(truncatingIfNeeded: $0 * 97) }))
         XCTAssertEqual(try NativePNG.decode(adam7).pixels, Data((0..<40).map { UInt8(truncatingIfNeeded: $0 * 97) }))
     }
-    func testNativePNGRejectsAmbiguousHeadersAndUnsupportedTransparency() throws {
+    func testNativePNGAcceptsSupportedTransparencyAndRejectsAmbiguousHeaders() throws {
         let source = NativePNG(header: .init(width: 2, height: 1, bits: 8, channels: 3, color: 2, interlace: 0), pixels: Data(repeating: 0, count: 6), colorChunks: [("tRNS", Data(repeating: 0, count: 6))])
-        XCTAssertThrowsError(try NativePNG.decode(source.encoded()))
+        let decoded = try NativePNG.decode(source.encoded())
+        XCTAssertEqual(decoded.pixels, source.pixels)
+        XCTAssertEqual(decoded.colorChunks.first?.1, source.colorChunks.first?.1)
+        XCTAssertEqual(try decoded.modelFloatSamples(role: "input", encoding: "linear_rgb"), [Float](repeating: 0, count: 6))
+        let malformed = NativePNG(header: source.header, pixels: source.pixels, colorChunks: [("tRNS", Data(repeating: 0, count: 2))])
+        XCTAssertThrowsError(try malformed.encoded())
         let plain = NativePNG(header: source.header, pixels: source.pixels, colorChunks: [])
         var duplicated = try plain.encoded(); duplicated.insert(contentsOf: duplicated.subdata(in: 8..<33), at: 33)
         XCTAssertThrowsError(try NativePNG.decode(duplicated))

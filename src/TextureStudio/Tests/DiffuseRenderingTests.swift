@@ -57,6 +57,8 @@ final class DiffuseRenderingTests: XCTestCase {
                           camera: CameraMetadata(), pixelWidth: side, pixelHeight: side)
         }
         let engine = TextureEngine(), context = try colourContext()
+        let numeric = CIContext(options: [.workingFormat: CIFormat.RGBAf,
+                                         .workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
         var settings = TextureSettings()
         settings.rotationX = 20; settings.rotationY = 10; settings.rotationZ = 4
         settings.heightDetail = 0.75; settings.roughnessDetail = 1
@@ -76,12 +78,12 @@ final class DiffuseRenderingTests: XCTestCase {
                 XCTAssertEqual(actual[channel] / actual[3], reference[channel], accuracy: 0.001,
                                "Opacity must not change a visible material's straight color")
             }
-            XCTAssertEqual(pixel(material.height, x: x, y: y, context: context)[0], 0.5, accuracy: 0.001)
-            XCTAssertEqual(pixel(material.roughness, x: x, y: y, context: context)[0], settings.roughnessBase, accuracy: 0.001)
+            XCTAssertEqual(numericPixel(material.height, x: x, y: y, context: numeric), 0.5, accuracy: 0.001)
+            XCTAssertEqual(numericPixel(material.roughness, x: x, y: y, context: numeric), settings.roughnessBase, accuracy: 0.001)
         }
-        XCTAssertEqual(pixel(material.height, x: 512, y: 512, context: context)[0], 0.5, accuracy: 0.001,
+        XCTAssertEqual(numericPixel(material.height, x: 512, y: 512, context: numeric), 0.5, accuracy: 0.001,
                        "Fully transparent photo pixels must not fabricate brightness relief")
-        XCTAssertEqual(pixel(material.roughness, x: 512, y: 512, context: context)[0], settings.roughnessBase, accuracy: 0.001)
+        XCTAssertEqual(numericPixel(material.roughness, x: 512, y: 512, context: numeric), settings.roughnessBase, accuracy: 0.001)
     }
 
     func testOptInBrownWallRAWHasFiniteDiffuseWithoutSaturatedRedTiles() async throws {
@@ -172,6 +174,15 @@ final class DiffuseRenderingTests: XCTestCase {
                 bounds: CGRect(x: x, y: y, width: 1, height: 1), format: .RGBAf, colorSpace: linear)
         }
         return rgba
+    }
+
+    private func numericPixel(_ image: CIImage, x: Int, y: Int, context: CIContext) -> Float {
+        var rgba = [Float](repeating: 0, count: 4)
+        rgba.withUnsafeMutableBytes {
+            context.render(image, toBitmap: $0.baseAddress!, rowBytes: 16,
+                           bounds: CGRect(x: x, y: y, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        }
+        return rgba[0]
     }
 
     private struct RenderMetrics {

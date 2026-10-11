@@ -2,6 +2,8 @@
 
 Assessment dated October 10, 2026. **Two independent 512 jobs are plausible in memory on this 64 GiB M2 Max, but a useful throughput improvement has not been demonstrated. Keep one GPU trainer as the default. For several materials contributing to one adapter, investigate a physical batch of two before adding simultaneous trainers.** Neither option is enabled by this assessment.
 
+The later performance discussion prioritizes a [smaller material base](material-training-smaller-base-2026-10-10.md). The experiment below is a future qualification plan if concurrency remains necessary, not work scheduled before that smaller-model decision.
+
 ## Measured starting point
 
 The host reports an Apple M2 Max with 12 CPU cores, 30 GPU cores and 64 GiB unified memory. The retained [October 10 evidence JSON](native-training-throughput-2026-10-10.json) and [measurement notes](native-training-throughput-2026-10-10.md) provide these single-job observations:
@@ -12,7 +14,7 @@ The host reports an Apple M2 Max with 12 CPU cores, 30 GPU cores and 64 GiB unif
 | Adaptive map-decoder, rank 8 / alpha 8 | 5.762392 s on first red-brick input; later repeated inputs 5.006647 / 4.934533 s | 10.4167 GiB | Two real materials, four total steps, validation and export; 29.840368 s complete job |
 | Earlier fine-stage map-decoder, rank 64 / alpha 16 | 8.138213 s | 22.59 GiB | Historical execution policy; three synthetic steps |
 
-The measured adaptive model source SHA-256 is `6341ea5e771e58605ca6b039f9146684040bf56a91a7a196661040249c40de82`, which matches `NativeMaterialModel.swift` at assessment time. The trainer and UI are being revised separately; these timings qualify the recorded source, not a fresh run of those revisions. The permanent JSON retains selected raw values and provenance; the original `out/training-throughput-audit/` reports referenced in it are absent from this checkout.
+The measured adaptive model source SHA-256 is `6341ea5e771e58605ca6b039f9146684040bf56a91a7a196661040249c40de82`, which matched `NativeMaterialModel.swift` before this update. This update changes sample-error classification, transparency, scheduling and the UI; these timings qualify the recorded source, not a fresh run of those revisions. The permanent JSON retains selected raw values and provenance; the original `out/training-throughput-audit/` reports referenced in it are absent from this checkout.
 
 The real job reused 198 compiled packages, made no compilations, peaked at 7.9983 GiB of sampled Metal allocations, and observed no growth in system swap. Footprint and Metal allocations overlap and must not be added. Two times the observed process footprint is approximately **20.83 GiB**; this is a sizing illustration, not a measured concurrent peak. Compiler workspaces, other applications, different ranks/scopes and large-dataset cache behavior can raise use.
 

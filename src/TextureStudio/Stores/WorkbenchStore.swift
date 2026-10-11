@@ -707,6 +707,10 @@ final class WorkbenchStore {
                         result.requestedUpdates.map { " Saved \(completed.formatted()) of \($0.formatted()) updates." }
                     } ?? " Saved the completed updates."
                     self.activity = "Training time limit reached." + counts
+                } else if result.stoppedReason == "no_valid_training_samples" {
+                    self.activity = result.completedUpdates == 0 ?
+                        "No valid training samples remain. Saved the current weights without training." :
+                        "No valid training samples remain. Saved \((result.completedUpdates ?? 0).formatted()) completed steps."
                 } else if self.isSavingTraining || result.status == "stopped" {
                     self.activity = "Stopped and saved material LoRA."
                 } else {
@@ -855,10 +859,12 @@ final class WorkbenchStore {
                 hasTrainingStarted = true
                 if !isStopping { activity = "Training material LoRA…" }
             case "training_stopped":
-                guard event["stopped_reason"] as? String == "time_limit", !isStopping else { continue }
+                guard let reason = event["stopped_reason"] as? String,
+                      ["time_limit", "no_valid_training_samples"].contains(reason), !isStopping else { continue }
                 isStopping = true
                 isSavingTraining = true
-                activity = "Training time limit reached. Validating and saving completed updates…"
+                activity = reason == "time_limit" ? "Training time limit reached. Validating and saving completed updates…" :
+                    "No valid training samples remain. Saving current weights…"
             case "training_setup", "update_started", "operation_progress", "update", "validation_started", "validation_sample", "checkpoint_started", "export_started":
                 if let progress = trainingProgress {
                     activity = [progress.currentUpdateSummary, progress.operationDetail.isEmpty ? nil : progress.operationDetail,

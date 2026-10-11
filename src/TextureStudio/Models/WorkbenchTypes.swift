@@ -313,7 +313,7 @@ struct MaterialTrainingOptions: Codable, Equatable, Sendable {
     var minimumLearningRateRatio = 0.1
     var warmupUpdates = 0
     var seed: UInt64 = 17
-    var validationEvery = 1
+    var validationEvery = 0
     var validationUnit: MaterialTrainingIntervalUnit = .epoch
     var checkpointEvery = 0
     var checkpointUnit: MaterialTrainingIntervalUnit = .epoch
@@ -353,12 +353,12 @@ struct MaterialTrainingOptions: Codable, Equatable, Sendable {
         seed = try values.decodeIfPresent(UInt64.self, forKey: .seed) ?? seed
         validationEvery = try values.decodeIfPresent(Int.self, forKey: .validationEvery) ?? validationEvery
         // Existing saved schedules counted optimizer updates. Preserve their
-        // frequency as steps while new or partial settings default to epochs.
+        // frequency as steps while new or disabled settings default to epochs.
         validationUnit = try values.decodeIfPresent(MaterialTrainingIntervalUnit.self, forKey: .validationUnit) ??
-            (values.contains(.validationEvery) ? .step : .epoch)
+            (validationEvery > 0 ? .step : .epoch)
         checkpointEvery = try values.decodeIfPresent(Int.self, forKey: .checkpointEvery) ?? checkpointEvery
         checkpointUnit = try values.decodeIfPresent(MaterialTrainingIntervalUnit.self, forKey: .checkpointUnit) ??
-            (values.contains(.checkpointEvery) ? .step : .epoch)
+            (checkpointEvery > 0 ? .step : .epoch)
     }
 
     /// Preserve supported choices when reopening on another Mac.

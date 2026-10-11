@@ -82,7 +82,7 @@ enum NativeMaterialTrainer {
                 maxGradientNorm: nonnegative("--max-gradient-norm", default: 1))
             updatesPerMap = Int(value("--updates-per-map") ?? "100") ?? 0
             maxMinutes = Double(value("--max-minutes") ?? "30") ?? .nan
-            validationEvery = Int(value("--validation-every") ?? "1") ?? -1
+            validationEvery = Int(value("--validation-every") ?? "0") ?? -1
             checkpointEvery = Int(value("--checkpoint-every") ?? "0") ?? -1
             guard let validationUnit = MaterialTrainingIntervalUnit(rawValue: value("--validation-unit") ?? "epoch"),
                   let checkpointUnit = MaterialTrainingIntervalUnit(rawValue: value("--checkpoint-unit") ?? "epoch") else {
@@ -318,7 +318,8 @@ enum NativeMaterialTrainer {
                     "operation": "Loading validation maps"])
                 let mae: Double? = try autoreleasepool {
                     guard let data = try availablePair(sample, phase: "validation") else { return nil }
-                    let result = try program.execute(rgb: data.0, adapters: model.adapterWeights, reference: data.1,
+                    do {
+                        let result = try program.execute(rgb: data.0, adapters: model.adapterWeights, reference: data.1,
                         featureKey: sample.inputSHA256 + ":" + sample.inputEncoding, checkCancellation: { try control.check() }, onStage: { done, total in
                             if done == 1 || done % 10 == 0 || done == total {
                                 try? emit(["event": "feature_progress", "phase": "validation", "sample_id": sample.id, "completed": done, "total": total])
@@ -327,11 +328,14 @@ enum NativeMaterialTrainer {
                             try? emit(["event": "operation_progress", "phase": "validation", "operation": operation,
                                 "completed": done, "total": total])
                         })
-                    guard let loss = result.valueLoss, loss.isFinite else {
-                        try quarantine(sample, phase: "validation", error: StudioError("The validation sample produced a nonfinite loss."))
+                        guard let loss = result.valueLoss, loss.isFinite else {
+                            throw NativeMaterialSampleError(message: "The validation sample produced a nonfinite loss.")
+                        }
+                        return Double(loss)
+                    } catch let error as NativeMaterialSampleError {
+                        try quarantine(sample, phase: "validation", error: error)
                         return nil
                     }
-                    return Double(loss)
                 }
                 guard let mae else { continue }
                 errors.append(["sample_id": sample.id, "mae": mae]); sum += mae
@@ -387,6 +391,7 @@ enum NativeMaterialTrainer {
                         "sample_total": training.count, "operation": "Loading training maps"])
                     let updateStarted = now()
                     var accumulated = NativeMaterialGradientAccumulator()
+                    var evaluatedSamples: [NativeMaterialDatasetService.TrainingSample] = []
                     var valueLoss = Double(0), detailLoss = Double(0), totalLoss = Double(0)
                     var dataPreparationSeconds = 0.0
                     let rate = options.effectiveLearningRate(update: completed + 1, totalUpdates: requestedUpdates)
@@ -408,7 +413,7 @@ enum NativeMaterialTrainer {
                             let loadingStarted = ProcessInfo.processInfo.systemUptime
                             guard let data = try availablePair(accumulatedSample, phase: "training") else { return nil }
                             dataPreparationSeconds += ProcessInfo.processInfo.systemUptime - loadingStarted
-                            return try program.execute(rgb: data.0, adapters: model.adapterWeights, reference: data.1,
+                            do { return try program.execute(rgb: data.0, adapters: model.adapterWeights, reference: data.1,
                             gradientsOnly: true,
                             featureKey: accumulatedSample.inputSHA256 + ":" + accumulatedSample.inputEncoding, checkCancellation: { try control.check() }, onStage: { done, total in
                                 if done == 1 || done % 10 == 0 || done == total {
@@ -419,6 +424,10 @@ enum NativeMaterialTrainer {
                                 try? emit(["event": "operation_progress", "phase": "training", "operation": operation,
                                     "completed": done, "total": total, "accumulation_step": microbatch + 1])
                             })
+                            } catch let error as NativeMaterialSampleError {
+                                try quarantine(accumulatedSample, phase: "training", error: error)
+                                return nil
+                            }
                         }
                         if let derivative {
                             // Validate before committing any compact sums. A bad
@@ -431,11 +440,12 @@ enum NativeMaterialTrainer {
                             }
                             var candidate = accumulated
                             do { try candidate.add(derivative.gradients) }
-                            catch { try quarantine(accumulatedSample, phase: "training", error: error)
+                            catch let error as NativeMaterialSampleError { try quarantine(accumulatedSample, phase: "training", error: error)
                                 if control.shouldStopAndSave || timeLimitReached() { break }
                                 continue
                             }
                             accumulated = candidate
+                            evaluatedSamples.append(accumulatedSample)
                             valueLoss += Double(value); detailLoss += Double(detail); totalLoss += Double(loss)
                             sampleEvaluations += 1
                         }
@@ -451,15 +461,25 @@ enum NativeMaterialTrainer {
                     }
                     try emit(["event": "operation_progress", "phase": "training", "operation": "Applying optimizer update", "completed": 0, "total": 1])
                     let optimizerStarted = ProcessInfo.processInfo.systemUptime
-                    let update = try NativeMaterialOptimizer.apply(gradients: accumulated.averaged(), weights: model.adapterWeights,
-                        state: optimizer, learningRate: rate, step: completed + 1, configuration: options.optimizerConfiguration)
+                    let update: NativeMaterialOptimizer.Update
+                    do {
+                        update = try NativeMaterialOptimizer.apply(gradients: accumulated.averaged(), weights: model.adapterWeights,
+                            state: optimizer, learningRate: rate, step: completed + 1, configuration: options.optimizerConfiguration)
+                    } catch let error as NativeMaterialSampleError {
+                        for sample in evaluatedSamples { try quarantine(sample, phase: "training", error: error) }
+                        activeUpdate = false
+                        if control.consumeCheckpoint() { _ = try save() }
+                        if control.shouldStopAndSave || timeLimitReached() { epochFinished = false; break }
+                        continue
+                    }
                     let optimizerSeconds = ProcessInfo.processInfo.systemUptime - optimizerStarted
                     try control.check()
                     model.updateAdapters(update.weights); optimizer = update.state
                     try emit(["event": "operation_progress", "phase": "training", "operation": "Applying optimizer update", "completed": 1, "total": 1])
                     completed += 1
                     activeUpdate = false
-                    try emit(["event": "update", "step": initialStep + completed, "sample_id": sample.id,
+                    try emit(["event": "update", "step": initialStep + completed, "sample_id": evaluatedSamples[0].id,
+                        "sample_ids": evaluatedSamples.map(\.id),
                         "value_l1": valueLoss / Double(accumulated.count), "detail_l1": detailLoss / Double(accumulated.count), "total": totalLoss / Double(accumulated.count),
                         "learning_rate": rate, "accumulated_samples": accumulated.count, "gradient_norm": update.gradientNorm,
                         "native_dimensions": [options.size, options.size],
@@ -467,9 +487,13 @@ enum NativeMaterialTrainer {
                         "cumulative_engine_statistics": try JSONSerialization.jsonObject(with: JSONEncoder().encode(program.executionStatistics)),
                         "update_duration_seconds": seconds(updateStarted.duration(to: now()))])
                     if control.shouldStopAndSave || timeLimitReached() { epochFinished = position == order.count - 1; break }
+                    // A full checkpoint validation at this epoch boundary also
+                    // satisfies a quick check due at the same weight snapshot.
+                    let epochCheckpointDue = position == order.count - 1 && cadenceDue(every: options.checkpointEvery,
+                        unit: options.checkpointUnit, steps: completed, epochs: completedEpochs + 1, epochBoundary: true)
                     if control.consumeCheckpoint() || cadenceDue(every: options.checkpointEvery, unit: options.checkpointUnit,
                         steps: completed, epochs: completedEpochs, epochBoundary: false) { _ = try save() }
-                    else if quickCount > 0, !validation.isEmpty, cadenceDue(every: options.validationEvery, unit: options.validationUnit,
+                    else if !epochCheckpointDue, quickCount > 0, !validation.isEmpty, cadenceDue(every: options.validationEvery, unit: options.validationUnit,
                         steps: completed, epochs: completedEpochs, epochBoundary: false) { _ = try check(full: false, context: "periodic") }
                     if control.shouldStopAndSave || timeLimitReached() { epochFinished = position == order.count - 1; break }
                 }
@@ -479,7 +503,7 @@ enum NativeMaterialTrainer {
                     if !control.shouldStopAndSave && !timeLimitReached() {
                         if cadenceDue(every: options.checkpointEvery, unit: options.checkpointUnit,
                             steps: completed, epochs: completedEpochs, epochBoundary: true) { _ = try save() }
-                        else if quickCount > 0, !validation.isEmpty, cadenceDue(every: options.validationEvery, unit: options.validationUnit,
+                        else if lastSavedStep != completed, quickCount > 0, !validation.isEmpty, cadenceDue(every: options.validationEvery, unit: options.validationUnit,
                             steps: completed, epochs: completedEpochs, epochBoundary: true) { _ = try check(full: false, context: "periodic") }
                     }
                 }

@@ -65,18 +65,7 @@ enum PhotoEvidenceService {
                     "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
                     "inputBiasVector": CIVector(x: CGFloat(assessment.offsets[0]), y: CGFloat(assessment.offsets[1]), z: CGFloat(assessment.offsets[2]), w: 0)
                 ])
-                // A coarse patch mask must not blend native-resolution transparency
-                // that fell between its assessment samples.
-                let coverage = warped.applyingFilter("CIColorMatrix", parameters: [
-                    "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 1),
-                    "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 1),
-                    "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 1),
-                    "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0),
-                    "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 1)
-                ]).applyingFilter("CIColorThreshold", parameters: ["inputThreshold": 0.99])
-                let mask = resized(assessment.mask, to: extent.size)
-                    .applyingFilter("CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: coverage])
-                image = corrected.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: image, kCIInputMaskImageKey: mask]).cropped(to: extent)
+                image = blendRegisteredCompanion(reference: image, companion: corrected, assessmentMask: assessment.mask)
                 notes.append("Spatial view \(index + 1): exposure and color matched; supporting samples blended in \(Int(assessment.acceptedFraction * 100))% of the surface. Uncertain or occluded regions keep the primary photo.")
             } catch is CancellationError { throw CancellationError() }
             catch {
@@ -84,6 +73,31 @@ enum PhotoEvidenceService {
             }
         }
         return PhotoEvidenceResult(image: image, warnings: notes)
+    }
+
+    /// A coarse assessment may miss native-resolution holes in either image.
+    /// Color evidence only contributes where both native samples are fully
+    /// opaque, so blending cannot fill holes or alter the primary photo's alpha.
+    static func blendRegisteredCompanion(reference: CIImage, companion: CIImage, assessmentMask: CIImage) -> CIImage {
+        func opaqueCoverage(_ image: CIImage) -> CIImage {
+            let coverage = image.applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+                "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+                "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+                "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 1)
+            ])
+            // CIColorThreshold uses a strict comparison. The preceding Float32
+            // value makes only exact full opacity pass without excluding 1.
+            return coverage.applyingFilter("CIColorThreshold", parameters: ["inputThreshold": Float(1).nextDown])
+        }
+        let extent = reference.extent
+        let mask = resized(assessmentMask, to: extent.size)
+            .transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
+            .applyingFilter("CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: opaqueCoverage(reference)])
+            .applyingFilter("CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: opaqueCoverage(companion)])
+        return companion.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: reference, kCIInputMaskImageKey: mask])
+            .cropped(to: extent)
     }
 
     private static func resized(_ image: CIImage, to size: CGSize) -> CIImage {

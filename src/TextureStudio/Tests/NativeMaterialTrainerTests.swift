@@ -8,7 +8,7 @@ final class NativeMaterialTrainerTests: XCTestCase {
     func testCadenceUsesEpochByDefaultAndRejectsRetiredOrInvalidUnits() throws {
         let arguments = ["train", "--dataset", "/dataset", "--output", "/output"]
         let options = try NativeMaterialTrainer.Options(arguments)
-        XCTAssertEqual(options.validationEvery, 1)
+        XCTAssertEqual(options.validationEvery, 0)
         XCTAssertEqual(options.validationUnit, .epoch)
         XCTAssertEqual(options.checkpointUnit, .epoch)
         for flag in ["--validation-unit", "--checkpoint-unit"] {
@@ -27,16 +27,19 @@ final class NativeMaterialTrainerTests: XCTestCase {
         let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
         let dataset = root.appendingPathComponent("dataset")
         try datasetFixture(dataset, trainingCount: 2)
-        for unit in ["epoch", "step"] {
-            let output = root.appendingPathComponent(unit), model = try trainerModel(), events = Recorder()
+        for (validationUnit, checkpointUnit, expectedSaves, expectedQuick) in [
+            ("epoch", "epoch", [4, 6], [2, 6]), ("step", "step", [2, 4, 6], [1, 3, 5]),
+            ("step", "epoch", [4, 6], [1, 2, 3, 5, 6]), ("epoch", "step", [2, 4, 6], [])
+        ] {
+            let output = root.appendingPathComponent(validationUnit + "-" + checkpointUnit), model = try trainerModel(), events = Recorder()
             let options = try NativeMaterialTrainer.Options(["train", "--dataset", dataset.path, "--output", output.path,
-                "--size", "256", "--updates-per-map", "3", "--validation-every", "1", "--validation-unit", unit,
-                "--checkpoint-every", "2", "--checkpoint-unit", unit])
+                "--size", "256", "--updates-per-map", "3", "--validation-every", "1", "--validation-unit", validationUnit,
+                "--checkpoint-every", "2", "--checkpoint-unit", checkpointUnit])
             _ = try await Task.detached { try NativeMaterialTrainer.train(options, onEvent: events.append, control: .init(), model: model) }.value
             let saves = events.events.filter { $0["event"] as? String == "checkpoint_saved" }.compactMap { $0["completed_updates"] as? Int }
             let quick = events.events.filter { $0["event"] as? String == "validation" && $0["context"] as? String == "periodic" }.compactMap { $0["completed_updates"] as? Int }
-            XCTAssertEqual(saves, unit == "epoch" ? [4, 6] : [2, 4, 6])
-            XCTAssertEqual(quick, unit == "epoch" ? [2, 6] : [1, 3, 5])
+            XCTAssertEqual(saves, expectedSaves)
+            XCTAssertEqual(quick, expectedQuick)
         }
     }
 

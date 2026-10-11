@@ -165,7 +165,7 @@ final class WorkbenchPreferencesTests: XCTestCase {
         XCTAssertEqual(options.size, 2048)
         XCTAssertEqual(options.modelName, "")
         XCTAssertEqual(options.target, "height")
-        XCTAssertEqual(options.validationEvery, 1)
+        XCTAssertEqual(options.validationEvery, 0)
         XCTAssertEqual(options.validationUnit, .epoch)
         XCTAssertEqual(options.checkpointUnit, .epoch)
         XCTAssertEqual(options.restored(for: fixture.resources), options)
@@ -179,7 +179,7 @@ final class WorkbenchPreferencesTests: XCTestCase {
         let fixture = try PreferencesFixture()
         defer { fixture.remove() }
         let first = WorkbenchStore(preferences: fixture.defaults, resources: fixture.resources)
-        XCTAssertEqual(first.training.validationEvery, 1)
+        XCTAssertEqual(first.training.validationEvery, 0)
         XCTAssertEqual(first.training.validationUnit, .epoch)
         XCTAssertEqual(first.training.checkpointEvery, 0)
         XCTAssertEqual(first.training.checkpointUnit, .epoch)
@@ -196,12 +196,12 @@ final class WorkbenchPreferencesTests: XCTestCase {
         XCTAssertEqual(training["checkpointUnit"] as? String, "epoch")
     }
 
-    func testLegacyTrainingIntervalsRemainStepsWithoutChangingCounts() throws {
-        for document in ["{\"validationEvery\":91,\"checkpointEvery\":125}",
-                         "{\"validationEvery\":0,\"checkpointEvery\":0}"] {
+    func testLegacyActiveIntervalsRemainStepsAndDisabledIntervalsDefaultToEpochs() throws {
+        for (document, unit) in [("{\"validationEvery\":91,\"checkpointEvery\":125}", MaterialTrainingIntervalUnit.step),
+                                 ("{\"validationEvery\":0,\"checkpointEvery\":0}", .epoch)] {
             let options = try JSONDecoder().decode(MaterialTrainingOptions.self, from: Data(document.utf8))
-            XCTAssertEqual(options.validationUnit, .step)
-            XCTAssertEqual(options.checkpointUnit, .step)
+            XCTAssertEqual(options.validationUnit, unit)
+            XCTAssertEqual(options.checkpointUnit, unit)
             let restored = try JSONDecoder().decode(MaterialTrainingOptions.self, from: JSONEncoder().encode(options))
             XCTAssertEqual(restored, options)
         }

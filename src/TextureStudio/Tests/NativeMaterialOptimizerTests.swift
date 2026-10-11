@@ -5,6 +5,25 @@ import XCTest
 final class NativeMaterialOptimizerTests: XCTestCase {
     private let arguments = ["train", "--dataset", "/dataset", "--output", "/output"]
 
+    func testSampleNumericalOverflowIsRecoverableAndDoesNotChangeWeightsOrAccumulation() throws {
+        let weights = ["a": NativeTensor.floats([1], shape: [1])]
+        let extreme = ["a": NativeTensor.floats([Float.greatestFiniteMagnitude], shape: [1])]
+        XCTAssertThrowsError(try NativeMaterialOptimizer.apply(gradients: extreme, weights: weights, state: [:],
+            learningRate: 0.001, step: 1, configuration: .init(maxGradientNorm: 0))) {
+            XCTAssertTrue($0 is NativeMaterialSampleError)
+        }
+        XCTAssertEqual(try weights["a"]!.floatValues(), [1])
+        var accumulated = NativeMaterialGradientAccumulator()
+        try accumulated.add(extreme)
+        var candidate = accumulated
+        XCTAssertThrowsError(try candidate.add(extreme)) { XCTAssertTrue($0 is NativeMaterialSampleError) }
+        XCTAssertEqual(accumulated.count, 1)
+        XCTAssertEqual(try accumulated.averaged()["a"]!.floatValues(), [Float.greatestFiniteMagnitude])
+        XCTAssertThrowsError(try accumulated.add(["missing": .floats([1], shape: [1])])) {
+            XCTAssertFalse($0 is NativeMaterialSampleError, "Structural optimizer contracts must remain fatal")
+        }
+    }
+
     func testDefaultsPreservePreviousNumericsAndLegacyPreferencesDecode() throws {
         let options = try NativeMaterialTrainer.Options(arguments)
         XCTAssertEqual(options.learningRate, 1e-5)

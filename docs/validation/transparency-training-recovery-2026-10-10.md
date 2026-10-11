@@ -1,0 +1,35 @@
+# Transparency and training recovery
+
+Validated locally on October 10, 2026, on the 64 GiB Apple M2 Max. The implementation stays native Swift, Core Image, Metal and MPSGraph.
+
+## Behavior
+
+- Photo-to-material perspective cropping uses the full projected frame. Interior transparency and partial opacity do not change its crop. Lighting and photo-detail operations account for premultiplied color, preserve diffuse opacity, and avoid false relief from transparent holes. Registered companions blend only where both full-resolution images are opaque.
+- Prepared planar training maps bypass that photo-processing path. Native PNG loading retains encoded numeric/color values independently of alpha, including valid grayscale/RGB transparency keys at 8 and 16 bits. No padding, transparency-based cropping or context fabrication is added.
+- A failed sample read, checksum, decode, grid check or recoverable numerical evaluation quarantines that sample and continues the run. The run records sample identity, split, paths, phase and reason in `skipped-samples.json`, progress and final metadata. Validation reports the actual successful count, or unavailable, and saving proceeds even when every validation sample fails.
+- Gradient accumulation retains only valid contributions. Nonfinite accumulation/optimizer results cannot mutate accepted gradients, weights or Adam moments. Structural model/optimizer errors and explicit cancellation keep their existing error/Abort semantics. If no valid training samples remain, current weights are saved with a stopped result and the actual completed step count.
+- Quick checks and checkpoints have independent epoch/step controls to the right of each numeric input. Epoch is the default unit; both periodic actions default to zero/off. Active numeric-only legacy preferences preserve their prior frequency as steps; disabled legacy schedules adopt epoch. Requested saves and final export remain available.
+
+## Verification
+
+The first complete Release XCTest run executed 382 tests with four optional tests skipped. It reported four assertions across three test cases: the old expectation that valid PNG transparency keys must be rejected, a fixture inheriting automatic upload, and a dropdown test assuming a native `NSPopUpButton`. All model, optimizer, trainer, photo/transparency and progress suites passed in that run. The test fixtures were corrected rather than weakening sample checks or changing numerical behavior.
+
+After changing the new-run quick-check default to off, a focused run executed 55 tests with two optional skips. All 22 trainer tests, 17 training-preparation tests and 13 preference tests passed. The remaining PNG fixture needed its required explicit diffuse transfer. The hosted menu test was placed in the production grouped Form context and checked rendered layout and selection, without assuming SwiftUI exposes an in-process native popup or virtual accessibility node.
+
+The final focused run passed **16 tests, zero failures, zero skips**: both hosted training-layout tests, all 13 preference tests including active-step/disabled-epoch migration, and the corrected PNG case. This resolves every test case that failed in the complete run. The expensive complete numerical suite was not repeated after test-fixture and interval-preference corrections. Hosted images demonstrate the dropdown immediately to the input's right and its rendered [epoch](transparency-training-control-2026-10-10.png) to [step](transparency-training-control-step-2026-10-10.png) change; persistence also passed. They do not establish an external accessibility or live mouse/keyboard click-through.
+
+Relevant numerical coverage includes staged and monolithic recovery after nonfinite sample losses, unchanged weights after failed evaluation, finite-gradient optimizer overflow, candidate accumulation isolation, all-factor Adam equivalence, checkpoint replay, and Stop & Save / Abort / deadline behavior. Recovery coverage includes a training file becoming unreadable during accumulation, corrupt training pairs across epochs, and a validation target disappearing after the final successful training step; checkpoint and export still completed in that last case. Cadence coverage exercises all four combinations of epoch/step units.
+
+Commands and logs:
+
+- Complete Release tests: `xcodebuild -project src/TextureStudio/TextureStudio.xcodeproj -scheme TextureStudio -configuration Release -destination 'platform=macOS,arch=arm64' -derivedDataPath build/TransparencyTrainingValidation ENABLE_TESTABILITY=YES ENABLE_HARDENED_RUNTIME=NO test`. Log: `/tmp/ipde-transparency-training-full-tests.log`.
+- Focused default/recovery/preferences/preparation/layout rerun: the same command with `-only-testing` selectors for those classes and the corrected PNG method. Log: `/tmp/ipde-transparency-training-final-tests.log`.
+- Final hosted UI / preferences / PNG verification: the same Release test command, selecting `TrainingWorkbenchLayoutTests`, `WorkbenchPreferencesTests`, and `NativeMaterialDatasetTests/testNativePNGAcceptsSupportedTransparencyAndRejectsAmbiguousHeaders`. Log: `/tmp/ipde-training-interval-final-ui-tests.log`. Result: `build/TransparencyTrainingValidation/Logs/Test/Test-TextureStudio-2026.10.10_22-18-04--0400.xcresult`.
+- Native build-tool and installer checks passed. Log: `/tmp/ipde-transparency-build-tools.log`.
+- Normal production `make package` passed, including native payload checks and strict signatures for the parent and four material tools. Log: `/tmp/ipde-transparency-package-final.log`.
+- Native install used `xcrun swift script/install_macos.swift 'build/TextureStudio/Build/Products/Release/Texture Studio.app' --if-closed`. It installed `/Applications/Texture Studio.app` without interrupting an application. Log: `/tmp/ipde-transparency-install.log`.
+- Installed `Texture Studio --smoke-test` passed. Log: `/tmp/ipde-transparency-installed-smoke.log`. `codesign --verify --deep --strict` and recursive byte comparison against the packaged build passed. The local arm64 Release bundle is ad hoc signed with hardened runtime; this is local installation validation.
+
+The application version is 0.9.13, build 107. The build and installed main executable SHA-256 both equal `2fb7e37a9a16bc2a1b0e60b4483811ff0f72915e3b55a0c2cfbded4cdb004ecb`. The packaged ZIP SHA-256 is `b4a4f4ebed82dbc40eef909ff6499914dfd3f1f9cc842b20027f1307a25fd67c`.
+
+These checks establish recovery and transparency behavior in controlled fixtures. They are not an hours-long production soak or a new 512 throughput benchmark. The retained approximately 9 ms loader and 5–6 s model-step measurements concern the earlier recorded model source; they support retaining inexpensive data checks and investigating a smaller network. See [concurrency](training-concurrency-2026-10-10.md) and [smaller-base](material-training-smaller-base-2026-10-10.md) assessments. Concurrent training and a compact replacement model have not been implemented or benchmarked by this change.

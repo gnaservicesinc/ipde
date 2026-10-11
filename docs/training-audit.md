@@ -41,7 +41,7 @@ Before this change, the native trainer accepted learning rate through its comman
 | Native grid | `1024 × 1024` | Whole-grid training; source maps are never resized |
 | Training scope | Map output branch | Selected RRDB branch; developer scope also adapts its decoder |
 | Updates per map / time limit | `100` / `30` minutes | Optimizer applications per map and deadline |
-| Quick check / checkpoint interval | `20` / `0` updates | `0` disables the periodic action |
+| Quick check / checkpoint interval | `0` / `0` epochs | Independent epoch/step selectors; periodic actions are off by default. Active numeric-only legacy schedules retain their count as steps; disabled schedules adopt epoch. |
 
 AdamW is a useful configurable extension because its decay does not enter either moment estimate. With the default decay of zero and the same betas, epsilon and clipping, its update matches the earlier Adam recipe. This default avoids silently changing regularization on existing adapters. See the [official AdamW definition](https://docs.pytorch.org/docs/2.14/generated/torch.optim.AdamW.html). Upstream NAdamW adds Nesterov momentum scheduling; it is not synonymous with AdamW and is not offered by this native implementation. See the [official NAdam definition](https://docs.pytorch.org/docs/2.14/generated/torch.optim.NAdam.html).
 

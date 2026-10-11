@@ -34,11 +34,12 @@ struct NativeMaterialGradientAccumulator {
         }
         for (name, gradient) in gradients {
             let values = try gradient.floatValues()
-            guard gradient.dtype == "F32", values.allSatisfy(\.isFinite) else { throw StudioError("An adapter gradient is nonfinite or has an unsupported type.") }
+            guard gradient.dtype == "F32" else { throw StudioError("An adapter gradient has an unsupported type.") }
+            guard values.allSatisfy(\.isFinite) else { throw NativeMaterialSampleError(message: "An adapter gradient is nonfinite for this sample.") }
             if var sum = sums[name] {
                 guard shapes[name] == gradient.shape, sum.count == values.count else { throw StudioError("Accumulated adapter gradient dimensions changed.") }
                 for index in sum.indices { sum[index] += values[index] }
-                guard sum.allSatisfy(\.isFinite) else { throw StudioError("Accumulated adapter gradients overflowed Float32.") }
+                guard sum.allSatisfy(\.isFinite) else { throw NativeMaterialSampleError(message: "This sample overflowed accumulated adapter gradients in Float32.") }
                 sums[name] = sum
             } else { sums[name] = values; shapes[name] = gradient.shape }
         }
@@ -104,7 +105,9 @@ enum NativeMaterialOptimizer {
                 let decayed = configuration.algorithm == "adamw" ? parameter * (1 - rate * decay) : parameter
                 values[index] = Float(decayed - rate * direction)
             }
-            guard values.allSatisfy(\.isFinite), m.allSatisfy(\.isFinite), v.allSatisfy(\.isFinite) else { throw StudioError("Native optimizer overflowed; adapter weights remain untouched.") }
+            guard values.allSatisfy(\.isFinite), m.allSatisfy(\.isFinite), v.allSatisfy(\.isFinite) else {
+                throw NativeMaterialSampleError(message: "This sample group overflowed the optimizer; adapter weights and moments remain untouched.")
+            }
             updated[name] = .floats(values, shape: tensor.shape)
             nextState[name + ".m"] = .floats(m, shape: tensor.shape)
             nextState[name + ".v"] = .floats(v, shape: tensor.shape)

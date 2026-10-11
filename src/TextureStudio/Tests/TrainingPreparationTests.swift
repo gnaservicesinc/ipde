@@ -156,7 +156,7 @@ final class TrainingPreparationTests: XCTestCase {
         XCTAssertNil(store.error)
         let train = try XCTUnwrap(fixture.calls.first { $0.first == "train" })
         XCTAssertEqual(value("--model-name", in: train), suggested)
-        XCTAssertEqual(value("--validation-every", in: train), "1")
+        XCTAssertEqual(value("--validation-every", in: train), "0")
         XCTAssertEqual(value("--validation-unit", in: train), "epoch")
         XCTAssertEqual(value("--checkpoint-unit", in: train), "epoch")
     }
@@ -251,11 +251,50 @@ final class TrainingPreparationTests: XCTestCase {
         XCTAssertNil(store.error)
     }
 
+    func testNoValidSamplesReportsSavedWeightsAndPreservesCompletedProgress() async throws {
+        for completed in [0, 3] {
+            let fixture = try Fixture()
+            defer { fixture.remove() }
+            fixture.trainingResult = ["status": "stopped", "stopped_reason": "no_valid_training_samples",
+                "completed_updates": completed, "requested_updates": 200]
+            fixture.holdTraining = true
+            let store = fixture.store()
+            store.uploadAfterTraining = false
+            try await store.loadTrainingCapabilities()
+            try await store.loadDataset(fixture.original)
+            store.training.size = 1024
+            store.startTraining()
+            for _ in 0..<200 {
+                if fixture.continuation != nil { break }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            XCTAssertNotNil(fixture.continuation)
+            store.recordTrainingProgress("{\"event\":\"training_started\"}\n")
+            let event = ["event": "training_stopped", "stopped_reason": "no_valid_training_samples",
+                "completed_updates": completed, "requested_updates": 200] as [String: Any]
+            store.recordTrainingProgress(try fixture.json(event) + "\n")
+            XCTAssertTrue(store.isSavingTraining)
+            XCTAssertFalse(store.canStopAndSave)
+            XCTAssertTrue(store.canAbort)
+            XCTAssertEqual(store.activity, "No valid training samples remain. Saving current weights…")
+            fixture.continuation?.resume(); fixture.continuation = nil
+            try await settled(store)
+            XCTAssertNil(store.error)
+            XCTAssertEqual(store.activity, completed == 0 ?
+                "No valid training samples remain. Saved the current weights without training." :
+                "No valid training samples remain. Saved 3 completed steps.")
+            XCTAssertEqual(store.trainingProgress?.completedUpdates, completed)
+            XCTAssertNotNil(store.selectedCheckpoint)
+            XCTAssertTrue(fixture.calls.contains { $0.first == "cleanup-size" })
+        }
+    }
+
     func testSkippedSamplesAndUnavailableValidationKeepRunActive() async throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
         fixture.holdTraining = true
         let store = fixture.store()
+        store.uploadAfterTraining = false
         try await store.loadTrainingCapabilities()
         try await store.loadDataset(fixture.original)
         store.training.size = 1024
