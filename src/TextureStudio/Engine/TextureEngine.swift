@@ -131,6 +131,8 @@ actor TextureEngine {
         } ?? max(extent.width,extent.height) * 1.35
         let corners = try TextureGeometry.projectedCorners(width: extent.width, height: extent.height,
             xDegrees: settings.rotationX, yDegrees: settings.rotationY, zDegrees: settings.rotationZ, focalPixels: focal)
+        // Source alpha describes material opacity, including interior holes.
+        // Only the projected full-frame geometry determines crop coverage.
         let largest = try TextureGeometry.maximumCrop(in: corners)
         let crop = try TextureGeometry.framedCrop(largest, scale: settings.cropScale,
                                                  offsetX: settings.cropOffsetX, offsetY: settings.cropOffsetY)
@@ -513,7 +515,10 @@ actor TextureEngine {
         var sample = [Float](repeating:0,count:4)
         sample.withUnsafeMutableBytes { context.render(average,toBitmap:$0.baseAddress!,rowBytes:16,
             bounds:CGRect(x:0,y:0,width:1,height:1),format:.RGBAf,colorSpace:linear) }
-        let mean = sample[0]*0.2126+sample[1]*0.7152+sample[2]*0.0722
+        // Core Image averages premultiplied color. Normalize by visible coverage
+        // so transparent holes do not darken the material's lighting target.
+        guard sample[3].isFinite, sample[3] > 1e-6 else { return 0.18 }
+        let mean = (sample[0]*0.2126+sample[1]*0.7152+sample[2]*0.0722) / sample[3]
         return mean.isFinite ? max(0.005,mean) : 0.18
     }
 

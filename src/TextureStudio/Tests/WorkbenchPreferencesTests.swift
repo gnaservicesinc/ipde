@@ -165,11 +165,56 @@ final class WorkbenchPreferencesTests: XCTestCase {
         XCTAssertEqual(options.size, 2048)
         XCTAssertEqual(options.modelName, "")
         XCTAssertEqual(options.target, "height")
+        XCTAssertEqual(options.validationEvery, 1)
+        XCTAssertEqual(options.validationUnit, .epoch)
+        XCTAssertEqual(options.checkpointUnit, .epoch)
         XCTAssertEqual(options.restored(for: fixture.resources), options)
         fixture.defaults.set(Data("{\"training\":{\"size\":2048}}".utf8), forKey: WorkbenchPreferences.key)
         let restored = WorkbenchStore(preferences: fixture.defaults, resources: fixture.resources)
         XCTAssertEqual(restored.training.size, 2048)
         XCTAssertTrue(restored.comparisonIncludesBase)
+    }
+
+    func testTrainingIntervalsDefaultToEpochsAndPersistIndependentUnits() throws {
+        let fixture = try PreferencesFixture()
+        defer { fixture.remove() }
+        let first = WorkbenchStore(preferences: fixture.defaults, resources: fixture.resources)
+        XCTAssertEqual(first.training.validationEvery, 1)
+        XCTAssertEqual(first.training.validationUnit, .epoch)
+        XCTAssertEqual(first.training.checkpointEvery, 0)
+        XCTAssertEqual(first.training.checkpointUnit, .epoch)
+        first.training.validationEvery = 3
+        first.training.validationUnit = .step
+        first.training.checkpointEvery = 2
+        first.training.checkpointUnit = .epoch
+        let reopened = WorkbenchStore(preferences: fixture.defaults, resources: fixture.resources)
+        XCTAssertEqual(reopened.training, first.training)
+        let data = try XCTUnwrap(fixture.defaults.data(forKey: WorkbenchPreferences.key))
+        let preferences = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let training = try XCTUnwrap(preferences["training"] as? [String: Any])
+        XCTAssertEqual(training["validationUnit"] as? String, "step")
+        XCTAssertEqual(training["checkpointUnit"] as? String, "epoch")
+    }
+
+    func testLegacyTrainingIntervalsRemainStepsWithoutChangingCounts() throws {
+        for document in ["{\"validationEvery\":91,\"checkpointEvery\":125}",
+                         "{\"validationEvery\":0,\"checkpointEvery\":0}"] {
+            let options = try JSONDecoder().decode(MaterialTrainingOptions.self, from: Data(document.utf8))
+            XCTAssertEqual(options.validationUnit, .step)
+            XCTAssertEqual(options.checkpointUnit, .step)
+            let restored = try JSONDecoder().decode(MaterialTrainingOptions.self, from: JSONEncoder().encode(options))
+            XCTAssertEqual(restored, options)
+        }
+        let partial = try JSONDecoder().decode(MaterialTrainingOptions.self, from: Data("{\"validationEvery\":91}".utf8))
+        XCTAssertEqual(partial.validationEvery, 91)
+        XCTAssertEqual(partial.validationUnit, .step)
+        XCTAssertEqual(partial.checkpointUnit, .epoch)
+        let explicit = try JSONDecoder().decode(MaterialTrainingOptions.self,
+            from: Data("{\"validationEvery\":91,\"validationUnit\":\"epoch\",\"checkpointEvery\":125,\"checkpointUnit\":\"step\"}".utf8))
+        XCTAssertEqual(explicit.validationEvery, 91)
+        XCTAssertEqual(explicit.validationUnit, .epoch)
+        XCTAssertEqual(explicit.checkpointEvery, 125)
+        XCTAssertEqual(explicit.checkpointUnit, .step)
     }
 
     func testReopeningPreservesZeroQuickChecksAndValuesBeyondFormerUICaps() throws {

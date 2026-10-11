@@ -34,6 +34,11 @@ struct TrainingProgressView: View {
                 ProgressView(value: progress.fractionCompleted)
                     .accessibilityLabel("Completed training steps")
             }
+            if progress.skippedSampleCount > 0 {
+                Text("Skipped samples: \(progress.skippedSampleCount.formatted()) · see operation log for details")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("training.skipped-samples")
+            }
             HStack(spacing: 12) {
                 if let update = progress.currentUpdateSummary { Text(update) }
                 if let epoch = progress.epochSummary { Text(epoch) }

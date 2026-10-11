@@ -41,6 +41,49 @@ final class DiffuseRenderingTests: XCTestCase {
         }
     }
 
+    func testPerspectiveCropPreservesInteriorTransparencyWithoutChangingVisibleColorOrGeometry() async throws {
+        let side = 256, color: [Float] = [0.28, 0.18, 0.10]
+        var rgba = [Float](repeating: 0, count: side * side * 4)
+        for y in 0..<side { for x in 0..<side {
+            let alpha: Float = hypot(Double(x - side / 2), Double(y - side / 2)) < 40 ? 0 : 0.35
+            let offset = (y * side + x) * 4
+            for channel in 0..<3 { rgba[offset + channel] = color[channel] * alpha }
+            rgba[offset + 3] = alpha
+        } }
+        let transparent = CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) }, bytesPerRow: side * 16,
+                                  size: CGSize(width: side, height: side), format: .RGBAf, colorSpace: linear)
+        func source(_ image: CIImage) -> TextureSource {
+            TextureSource(url: URL(fileURLWithPath: "/tmp/transparent-surface.png"), orientedImage: image,
+                          camera: CameraMetadata(), pixelWidth: side, pixelHeight: side)
+        }
+        let engine = TextureEngine(), context = try colourContext()
+        var settings = TextureSettings()
+        settings.rotationX = 20; settings.rotationY = 10; settings.rotationZ = 4
+        settings.heightDetail = 0.75; settings.roughnessDetail = 1
+        let opaque = try await engine.prepareDiffuse(source: source(constant(color + [1], side: side)), settings: settings)
+        let prepared = try await engine.prepareDiffuse(source: source(transparent), settings: settings)
+        XCTAssertEqual(prepared.crop, opaque.crop, "An interior transparency hole must not shrink or move the geometric crop")
+        XCTAssertEqual(prepared.corners, opaque.corners)
+        let material = try await engine.process(source: source(transparent), settings: settings, preparedDiffuse: prepared)
+        let centre = pixel(material.diffuse, x: 512, y: 512, context: context)
+        XCTAssertEqual(centre[3], 0, accuracy: 0.0001, "A valid projected source pixel may still be transparent")
+        for channel in 0..<3 { XCTAssertEqual(centre[channel], 0, accuracy: 0.0001) }
+        for (x, y) in [(100, 100), (900, 100), (100, 900), (900, 900)] {
+            let actual = pixel(material.diffuse, x: x, y: y, context: context)
+            let reference = pixel(opaque.diffuse, x: x, y: y, context: context)
+            XCTAssertEqual(actual[3], 0.35, accuracy: 0.0001)
+            for channel in 0..<3 {
+                XCTAssertEqual(actual[channel] / actual[3], reference[channel], accuracy: 0.001,
+                               "Opacity must not change a visible material's straight color")
+            }
+            XCTAssertEqual(pixel(material.height, x: x, y: y, context: context)[0], 0.5, accuracy: 0.001)
+            XCTAssertEqual(pixel(material.roughness, x: x, y: y, context: context)[0], settings.roughnessBase, accuracy: 0.001)
+        }
+        XCTAssertEqual(pixel(material.height, x: 512, y: 512, context: context)[0], 0.5, accuracy: 0.001,
+                       "Fully transparent photo pixels must not fabricate brightness relief")
+        XCTAssertEqual(pixel(material.roughness, x: 512, y: 512, context: context)[0], settings.roughnessBase, accuracy: 0.001)
+    }
+
     func testOptInBrownWallRAWHasFiniteDiffuseWithoutSaturatedRedTiles() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let path = environment["TEXTURE_STUDIO_TEST_PHOTO"], !path.isEmpty else {

@@ -18,6 +18,8 @@ final class MaterialTrainingHandoffTests: XCTestCase {
         XCTAssertEqual(restored.training, handoff.training)
         XCTAssertEqual(restored.training.scope, "map-decoder")
         XCTAssertEqual(restored.training.target, "normal")
+        XCTAssertEqual(restored.training.validationUnit, .step)
+        XCTAssertEqual(restored.training.checkpointUnit, .epoch)
     }
 
     func testReadRejectsUnknownSchemaRemotePathsAndInvalidTrainingSettings() throws {
@@ -85,7 +87,9 @@ final class MaterialTrainingHandoffTests: XCTestCase {
         options.scope = "map-decoder"
         options.useWarmStart = true
         options.validationEvery = 91
+        options.validationUnit = .step
         options.checkpointEvery = 125
+        options.checkpointUnit = .epoch
         options.useSelectedMaterialOnly = true
         return options
     }

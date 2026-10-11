@@ -101,6 +101,10 @@ final class TrainingPreparationTests: XCTestCase {
         store.training.minimumLearningRateRatio = 0.2
         store.training.warmupUpdates = 10
         store.training.seed = 42
+        store.training.validationEvery = 2
+        store.training.validationUnit = .epoch
+        store.training.checkpointEvery = 3
+        store.training.checkpointUnit = .step
         store.startTraining()
         try await settled(store)
         XCTAssertNil(store.error)
@@ -123,6 +127,10 @@ final class TrainingPreparationTests: XCTestCase {
         XCTAssertEqual(value("--minimum-learning-rate-ratio", in: train), "0.2")
         XCTAssertEqual(value("--warmup-updates", in: train), "10")
         XCTAssertEqual(value("--seed", in: train), "42")
+        XCTAssertEqual(value("--validation-every", in: train), "2")
+        XCTAssertEqual(value("--validation-unit", in: train), "epoch")
+        XCTAssertEqual(value("--checkpoint-every", in: train), "3")
+        XCTAssertEqual(value("--checkpoint-unit", in: train), "step")
         XCTAssertTrue(value("--output", in: train)?.hasPrefix(fixture.root.path + "/out/material-training/material-height-") == true,
             "Display names never become path components")
         XCTAssertFalse(train.contains("--developer-mode"))
@@ -148,6 +156,9 @@ final class TrainingPreparationTests: XCTestCase {
         XCTAssertNil(store.error)
         let train = try XCTUnwrap(fixture.calls.first { $0.first == "train" })
         XCTAssertEqual(value("--model-name", in: train), suggested)
+        XCTAssertEqual(value("--validation-every", in: train), "1")
+        XCTAssertEqual(value("--validation-unit", in: train), "epoch")
+        XCTAssertEqual(value("--checkpoint-unit", in: train), "epoch")
     }
 
     func testStopFinalizesOnlyAfterTrainingStartsAndAllowsFinalAdapterResult() async throws {
@@ -235,6 +246,36 @@ final class TrainingPreparationTests: XCTestCase {
         XCTAssertTrue(store.isTraining)
         XCTAssertTrue(store.validationSummary.contains("5/5"))
         XCTAssertEqual(store.checkpoints.last?.step, 2)
+        fixture.continuation?.resume(); fixture.continuation = nil
+        try await settled(store)
+        XCTAssertNil(store.error)
+    }
+
+    func testSkippedSamplesAndUnavailableValidationKeepRunActive() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        fixture.holdTraining = true
+        let store = fixture.store()
+        try await store.loadTrainingCapabilities()
+        try await store.loadDataset(fixture.original)
+        store.training.size = 1024
+        store.startTraining()
+        for _ in 0..<200 {
+            if fixture.continuation != nil { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        store.recordTrainingProgress("{\"event\":\"training_started\"}\n")
+        store.recordTrainingProgress("{\"event\":\"sample_skipped\",\"sample_id\":\"bad-map\",\"phase\":\"training\",\"error\":\"Unreadable PNG\",\"skipped_sample_count\":1}\n")
+        XCTAssertTrue(store.isTraining)
+        XCTAssertNil(store.error)
+        XCTAssertEqual(store.activity, "Skipped bad-map: Unreadable PNG · Training continues…")
+        store.recordTrainingProgress("{\"event\":\"validation\",\"scope\":\"full\",\"status\":\"unavailable\",\"sample_count\":0,\"pool_count\":2,\"mae\":null,\"skipped_sample_count\":3,\"validation_skipped_sample_count\":2}\n")
+        XCTAssertEqual(store.validationSummary, "Full validation unavailable: 0/2 crops · 2 skipped. Training and saving continue.")
+        store.recordTrainingProgress("{\"event\":\"validation\",\"scope\":\"quick\",\"sample_count\":1,\"pool_count\":2,\"mae\":0.025,\"validation_skipped_sample_count\":1}\n")
+        XCTAssertTrue(store.validationSummary.contains("1/2 crops"))
+        XCTAssertTrue(store.validationSummary.contains("1 skipped"))
+        XCTAssertTrue(store.isTraining)
+        XCTAssertNil(store.error)
         fixture.continuation?.resume(); fixture.continuation = nil
         try await settled(store)
         XCTAssertNil(store.error)

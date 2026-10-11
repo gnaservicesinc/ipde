@@ -5,6 +5,13 @@ import Metal
 import MetalPerformanceShaders
 import MetalPerformanceShadersGraph
 
+/// A sample's finite inputs can overflow during graph evaluation. The trainer
+/// may skip that sample without treating model or optimizer contracts as bad.
+struct NativeMaterialSampleError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+}
+
 struct NativeMaterialPrediction: Sendable {
     let width: Int, height: Int, channels: Int
     /// Planar NCHW, the direct Float32 network output. No clipping/stretching.
@@ -1027,7 +1034,10 @@ final class NativeMaterialModel: @unchecked Sendable {
                                            checkCancellation: checkCancellation)
             try checkCancellation()
             onOperation(optimize ? "Computing loss and applying optimizer" : "Computing prediction and loss", 1, 1)
-            guard result[0].allSatisfy(\.isFinite), reference == nil || result[1][0].isFinite else { throw StudioError("Material model produced nonfinite values; weights remain untouched.") }
+            guard result[0].allSatisfy(\.isFinite),
+                  reference == nil || result[1...3].allSatisfy({ $0[0].isFinite }) else {
+                throw NativeMaterialSampleError(message: "Material model produced nonfinite sample output or loss; weights remain untouched.")
+            }
             var updated: [String: NativeTensor] = [:], state: [String: NativeTensor] = [:]
             if optimize {
                 for (i, key) in ordered.enumerated() {
@@ -1041,7 +1051,7 @@ final class NativeMaterialModel: @unchecked Sendable {
             if differentiate {
                 for (index, name) in ordered.enumerated() {
                     let values = result[index + 4]
-                    guard values.allSatisfy(\.isFinite) else { throw StudioError("Native adapter gradients are nonfinite.") }
+                    guard values.allSatisfy(\.isFinite) else { throw NativeMaterialSampleError(message: "Native adapter gradients are nonfinite for this sample.") }
                     derivative[name] = .floats(values, shape: adapters[name]!.shape)
                 }
             }
@@ -1442,7 +1452,9 @@ final class NativeMaterialModel: @unchecked Sendable {
             onOperation("Computing training loss", 0, 1)
             let result = try executeValues(key: "final-loss", feeds: feeds.filter { finalNeeds.contains($0.key) }, targets: finalTargets,
                                            checkCancellation: checkCancellation)
-            guard result[0].allSatisfy(\.isFinite), result[1][0].isFinite else { throw StudioError("Material model produced nonfinite values.") }
+            guard result[0].allSatisfy(\.isFinite), result[1...3].allSatisfy({ $0[0].isFinite }) else {
+                throw NativeMaterialSampleError(message: "Material model produced nonfinite sample output or loss.")
+            }
             onOperation("Computing training loss", 1, 1)
             feeds.removeAll()
             var adjoints: [MPSGraphTensor: MPSGraphTensorData] = [:]
@@ -1561,8 +1573,11 @@ final class NativeMaterialModel: @unchecked Sendable {
             try checkCancellation()
             let parameterGradients = try gradientBuffers.mapValues { try NativeGraphExecution.tensor($0) }
             for name in parameterFeeds.keys {
-                guard let gradient = parameterGradients[name], try gradient.floatValues().allSatisfy(\.isFinite) else {
-                    throw StudioError("Native training returned a missing or nonfinite adapter gradient.")
+                guard let gradient = parameterGradients[name] else {
+                    throw StudioError("Native training returned a missing adapter gradient: \(name).")
+                }
+                guard try gradient.floatValues().allSatisfy(\.isFinite) else {
+                    throw NativeMaterialSampleError(message: "Native adapter gradients are nonfinite for this sample: \(name).")
                 }
                 if !gradientsOnly { base[gradients[name]!] = try NativeGraphExecution.tensorData(gradient) }
             }

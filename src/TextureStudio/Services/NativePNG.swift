@@ -18,7 +18,7 @@ struct NativePNG: Sendable {
     let colorChunks: [(String, Data)]
     private static let signature = Data([137, 80, 78, 71, 13, 10, 26, 10])
     private static let colorTypes: [UInt8: Int] = [0: 1, 2: 3, 4: 2, 6: 4]
-    private static let retainedChunks: Set<String> = ["cHRM", "gAMA", "iCCP", "sRGB", "sBIT", "cICP", "mDCV", "cLLI"]
+    private static let retainedChunks: Set<String> = ["cHRM", "gAMA", "iCCP", "sRGB", "sBIT", "cICP", "mDCV", "cLLI", "tRNS"]
 
     static func inspect(_ url: URL) throws -> Header {
         let file = try FileHandle(forReadingFrom: url)
@@ -38,6 +38,7 @@ struct NativePNG: Sendable {
     static func decode(_ data: Data) throws -> NativePNG {
         let header = try parseHeader(data)
         var cursor = 8, compressed = Data(), colors: [(String, Data)] = [], ended = false
+        var transparencySeen = false, compressedSeen = false
         try data.withUnsafeBytes { storage in
             let bytes = storage.bindMemory(to: UInt8.self)
             while cursor + 12 <= bytes.count {
@@ -47,8 +48,12 @@ struct NativePNG: Sendable {
                 let kind = String(decoding: UnsafeBufferPointer(start: bytes.baseAddress! + cursor + 4, count: 4), as: UTF8.self)
                 guard checksum(bytes, offset: cursor + 4, count: length + 4) == integer(bytes, cursor + 8 + length) else { throw invalid("PNG chunk checksum changed.") }
                 if kind == "IHDR", cursor != 8 { throw invalid("PNG contains more than one image header.") }
-                if kind == "tRNS" { throw invalid("PNG transparency tables need an explicit native channel conversion before training.") }
-                if kind == "IDAT" { compressed.append(bytes.baseAddress! + cursor + 8, count: length) }
+                if kind == "tRNS" {
+                    guard !transparencySeen, !compressedSeen else { throw invalid("Invalid PNG transparency chunk order.") }
+                    try validateTransparency(Data(bytes: bytes.baseAddress! + cursor + 8, count: length), header: header)
+                    transparencySeen = true
+                }
+                if kind == "IDAT" { compressedSeen = true; compressed.append(bytes.baseAddress! + cursor + 8, count: length) }
                 else if retainedChunks.contains(kind) { colors.append((kind, Data(bytes: bytes.baseAddress! + cursor + 8, count: length))) }
                 else if kind == "IEND" { ended = true; cursor += length + 12; break }
                 else if kind != "IHDR", bytes[cursor + 4] & 32 == 0 { throw invalid("Unsupported critical PNG chunk.") }
@@ -113,7 +118,7 @@ struct NativePNG: Sendable {
     static func sourceMetadata(_ data: Data) throws -> [String: Any] {
         let header = try parseHeader(data)
         var metadata: [String: Any] = ["width": header.width, "height": header.height, "sample_bits": header.bits, "channels": header.channels, "png_color_type": Int(header.color), "interlace": Int(header.interlace)]
-        var cursor = 8, ended = false
+        var cursor = 8, ended = false, transparencySeen = false, compressedSeen = false
         try data.withUnsafeBytes { storage in
             let bytes = storage.bindMemory(to: UInt8.self)
             while cursor + 12 <= bytes.count {
@@ -123,7 +128,12 @@ struct NativePNG: Sendable {
                 let kind = String(decoding: UnsafeBufferPointer(start: bytes.baseAddress! + cursor + 4, count: 4), as: UTF8.self)
                 guard checksum(bytes, offset: cursor + 4, count: length + 4) == integer(bytes, cursor + 8 + length) else { throw invalid("PNG chunk checksum changed.") }
                 if kind == "IHDR", cursor != 8 { throw invalid("PNG contains more than one image header.") }
-                if kind == "tRNS" { throw invalid("PNG transparency tables need an explicit native channel conversion before training.") }
+                if kind == "tRNS" {
+                    guard !transparencySeen, !compressedSeen else { throw invalid("Invalid PNG transparency chunk order.") }
+                    try validateTransparency(Data(bytes: bytes.baseAddress! + cursor + 8, count: length), header: header)
+                    transparencySeen = true
+                }
+                if kind == "IDAT" { compressedSeen = true }
                 if retainedChunks.contains(kind) {
                     if kind == "gAMA", length == 4 { metadata["png_gamma"] = Double(integer(bytes, cursor + 8)) / 100000 }
                     if kind == "sRGB", length == 1 { metadata["srgb_rendering_intent"] = Int(bytes[cursor + 8]) }
@@ -209,6 +219,7 @@ struct NativePNG: Sendable {
         guard inflateInit_(&stream, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size)) == Z_OK else { throw invalid("PNG decompression could not start.") }
         defer { inflateEnd(&stream) }
         var cursor = 8, colors: [(String, Data)] = [], ended = false, streamEnded = false, compressedSeen = false, profileBytes = 0
+        var transparencySeen = false
         try data.withUnsafeBytes { storage in
             let bytes = storage.bindMemory(to: UInt8.self)
             while cursor + 12 <= bytes.count {
@@ -218,7 +229,11 @@ struct NativePNG: Sendable {
                 let kind = String(decoding: UnsafeBufferPointer(start: bytes.baseAddress! + cursor + 4, count: 4), as: UTF8.self)
                 guard checksum(bytes, offset: cursor + 4, count: length + 4) == integer(bytes, cursor + 8 + length) else { throw invalid("PNG chunk checksum changed.") }
                 if kind == "IHDR", cursor != 8 { throw invalid("PNG contains more than one image header.") }
-                if kind == "tRNS" { throw invalid("PNG transparency tables need an explicit native channel conversion before training.") }
+                if kind == "tRNS" {
+                    guard !transparencySeen, !compressedSeen else { throw invalid("Invalid PNG transparency chunk order.") }
+                    try validateTransparency(Data(bytes: bytes.baseAddress! + cursor + 8, count: length), header: header)
+                    transparencySeen = true
+                }
                 if retainedChunks.contains(kind) {
                     profileBytes += length
                     guard profileBytes <= 16 * 1024 * 1024 else { throw invalid("PNG color metadata exceeds the native crop budget.") }
@@ -262,7 +277,7 @@ struct NativePNG: Sendable {
                     for pixel in 0..<r[2] * r[3] { for byte in 0..<header.bits / 8 { bytes[pixel * bpp + header.bits / 8 + byte] ^= 255 } }
                 }
             }
-            return NativePNG(header: Header(width: r[2], height: r[3], bits: header.bits, channels: header.channels, color: header.color, interlace: 0), pixels: selected[index], colorChunks: colors)
+            return NativePNG(header: Header(width: r[2], height: r[3], bits: header.bits, channels: header.channels, color: header.color, interlace: 0), pixels: selected[index], colorChunks: transformedChunks(colors, header: header, flipGreen: flipGreen))
         }
     }
     func crop(_ rectangle: [Int], flipGreen: Bool = false) throws -> NativePNG {
@@ -292,7 +307,8 @@ struct NativePNG: Sendable {
             }
         }
         return NativePNG(header: Header(width: width, height: height, bits: header.bits,
-            channels: header.channels, color: header.color, interlace: 0), pixels: selected, colorChunks: colorChunks)
+            channels: header.channels, color: header.color, interlace: 0), pixels: selected,
+            colorChunks: Self.transformedChunks(colorChunks, header: header, flipGreen: flipGreen))
     }
     func encoded() throws -> Data {
         try validateStorage()
@@ -333,6 +349,9 @@ struct NativePNG: Sendable {
     }
     /// Model tensors are a separate, explicit conversion from immutable integer
     /// source storage. Returned values use planar CHW order, matching training.
+    /// PNG color/data samples are unassociated with alpha. Training pairs are
+    /// already planar: alpha and color-key transparency are display metadata,
+    /// never a crop/coverage test, compositing operation, or reason to fill pixels.
     func modelFloatSamples(role: String, encoding: String = "linear_data", normalConvention: String = "opengl") throws -> [Float] {
         try validateStorage()
         guard ["input", "height", "roughness", "normal"].contains(role),
@@ -344,7 +363,7 @@ struct NativePNG: Sendable {
         var result = [Float](repeating: 0, count: count * outputChannels)
         let linear = ["linear", "linear_rgb", "linear_color", "linear_light"].contains(encoding)
         if role == "input", !linear, !["srgb", "sRGB", "source_srgb_assumed", "srgb_display", "srgb_color"].contains(encoding) { throw Self.invalid("Diffuse color transfer must be explicit.") }
-        let alpha = [2, 4].contains(channels), scalarRGB = ["height", "roughness"].contains(role) && channels >= 3
+        let scalarRGB = ["height", "roughness"].contains(role) && channels >= 3
         let flipGreen = role == "normal" && normalConvention.lowercased() == "directx", linearInput = role == "input" && linear
         try pixels.withUnsafeBytes { storage in
             let bytes = storage.bindMemory(to: UInt8.self).baseAddress!
@@ -357,7 +376,6 @@ struct NativePNG: Sendable {
                 for pixel in 0..<count {
                     if pixel & 4095 == 0 { try Task.checkCancellation() }
                     let offset = pixel * bytesPerPixel
-                    if alpha, code(offset, channels - 1) != maximum { throw Self.invalid("Transparent material crops need review; no context pixels are fabricated.") }
                     if scalarRGB, (code(offset, 0) != code(offset, 1) || code(offset, 0) != code(offset, 2)) { throw Self.invalid("Scalar material maps need identical RGB codes.") }
                     for channel in 0..<outputChannels {
                         let integer = code(offset, channel)
@@ -375,6 +393,32 @@ struct NativePNG: Sendable {
               header.width * header.height <= 150_000_000, [8, 16].contains(header.bits),
               Self.colorTypes[header.color] == header.channels, header.interlace <= 1,
               pixels.count == header.width * header.height * header.bytesPerPixel else { throw Self.invalid("PNG sample storage has an invalid size.") }
+        let transparency = colorChunks.filter { $0.0 == "tRNS" }
+        guard transparency.count <= 1 else { throw Self.invalid("PNG contains more than one transparency chunk.") }
+        if let chunk = transparency.first { try Self.validateTransparency(chunk.1, header: header) }
+    }
+    private static func validateTransparency(_ data: Data, header: Header) throws {
+        // Indexed PNGs are outside native integer storage. For supported gray/RGB
+        // images tRNS retains a 16-bit color key without changing their channels.
+        let count = header.color == 0 ? 1 : header.color == 2 ? 3 : 0
+        guard count > 0, data.count == count * 2 else { throw invalid("Invalid PNG transparency key.") }
+        let maximum = header.bits == 16 ? 65535 : 255
+        for channel in 0..<count {
+            guard Int(data[channel * 2]) * 256 + Int(data[channel * 2 + 1]) <= maximum else {
+                throw invalid("PNG transparency key exceeds its sample precision.")
+            }
+        }
+    }
+    private static func transformedChunks(_ chunks: [(String, Data)], header: Header, flipGreen: Bool) -> [(String, Data)] {
+        guard flipGreen else { return chunks }
+        return chunks.map { kind, data in
+            guard kind == "tRNS", header.color == 2 else { return (kind, data) }
+            var key = data
+            let green = Int(key[2]) * 256 + Int(key[3])
+            let complemented = (header.bits == 16 ? 65535 : 255) - green
+            key[2] = UInt8(complemented >> 8); key[3] = UInt8(truncatingIfNeeded: complemented)
+            return (kind, key)
+        }
     }
     private static func chunk(_ kind: String, _ payload: Data) -> Data {
         var result = Data(); result.appendBE(UInt32(payload.count))

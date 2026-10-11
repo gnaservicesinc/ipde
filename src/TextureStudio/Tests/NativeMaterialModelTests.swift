@@ -68,6 +68,40 @@ final class NativeMaterialModelTests: XCTestCase {
         }.value
     }
 
+    func testNonfiniteSampleLossIsRecoverableWithoutMutatingAdapters() async throws {
+        try XCTSkipIf(MTLCreateSystemDefaultDevice() == nil)
+        try await Task.detached {
+            let rgb = (0..<3 * 64 * 64).map { Float($0 % 97) / 97 }
+            // Every supplied value is finite; neighboring differences overflow
+            // Float32 when computing this sample's multiscale detail loss.
+            let overflowingReference = (0..<64 * 64).map {
+                $0 % 2 == 0 ? Float.greatestFiniteMagnitude : -Float.greatestFiniteMagnitude
+            }
+            XCTAssertTrue(overflowingReference.allSatisfy(\.isFinite))
+            for staged in [false, true] {
+                let model = try NativeMaterialModelFixture().model(adapter: true)
+                let before = model.adapterWeights
+                let program = try NativeMaterialModel.Program(model: model, width: 64, height: 64,
+                    target: "height", staged: staged)
+                XCTAssertThrowsError(try program.execute(rgb: rgb, adapters: before,
+                    reference: overflowingReference, gradientsOnly: true)) { error in
+                    XCTAssertTrue(error is NativeMaterialSampleError,
+                        "A generated nonfinite sample loss must be recoverable, not a model contract failure: \(error)")
+                }
+                for name in before.keys { XCTAssertEqual(before[name]!.bytes, model.adapterWeights[name]!.bytes) }
+                let recovered = try program.execute(rgb: rgb, adapters: before,
+                    reference: [Float](repeating: 0.3, count: 64 * 64), gradientsOnly: true)
+                XCTAssertTrue(try XCTUnwrap(recovered.loss).isFinite)
+                XCTAssertTrue(recovered.output.allSatisfy(\.isFinite))
+                XCTAssertEqual(Set(recovered.gradients.keys), Set(before.keys))
+                for gradient in recovered.gradients.values {
+                    XCTAssertTrue(try gradient.floatValues().allSatisfy(\.isFinite))
+                }
+                for name in before.keys { XCTAssertEqual(before[name]!.bytes, model.adapterWeights[name]!.bytes) }
+            }
+        }.value
+    }
+
     func testRawAdapterGradientsMatchLegacyAdamUpdateWithoutMutatingWeights() async throws {
         try XCTSkipIf(MTLCreateSystemDefaultDevice() == nil)
         try await Task.detached {

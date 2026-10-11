@@ -5,6 +5,42 @@ import XCTest
 
 @MainActor
 final class TrainingWorkbenchLayoutTests: XCTestCase {
+    func testIntervalDropdownSitsToRightOfNumberAndPersistsUnitChanges() async throws {
+        let suite = "training-interval-control-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = WorkbenchStore(preferences: defaults)
+        let value = Binding(get: { store.training.validationEvery }, set: { store.training.validationEvery = $0 })
+        let unit = Binding(get: { store.training.validationUnit }, set: { store.training.validationUnit = $0 })
+        let host = NSHostingView(rootView: TrainingIntervalField("Quick check every", value: value, unit: unit).padding(20))
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 440, height: 120),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.close() }
+        try await waitFor(host) { Self.dropdown(in: host) != nil && Self.numberField(in: host) != nil }
+        let field = try XCTUnwrap(Self.numberField(in: host))
+        let dropdown = try XCTUnwrap(Self.dropdown(in: host))
+        XCTAssertEqual(field.stringValue, "1")
+        XCTAssertEqual(dropdown.itemTitles, ["epoch", "step"])
+        XCTAssertEqual(dropdown.titleOfSelectedItem, "epoch")
+        let numericFrame = field.convert(field.bounds, to: host)
+        let unitFrame = dropdown.convert(dropdown.bounds, to: host)
+        XCTAssertGreaterThan(unitFrame.minX, numericFrame.maxX, "Choose the interval unit immediately to the right of its input")
+        dropdown.selectItem(withTitle: "step")
+        dropdown.sendAction(dropdown.action, to: dropdown.target)
+        try await waitFor(host) { store.training.validationUnit == .step }
+        XCTAssertEqual(WorkbenchStore(preferences: defaults).training.validationUnit, .step)
+        XCTAssertEqual(store.training.checkpointUnit, .epoch, "The two schedules have independent units")
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let attachment = XCTAttachment(image: NSImage(cgImage: try XCTUnwrap(bitmap.cgImage), size: host.bounds.size))
+        attachment.name = "Training interval number and epoch / step dropdown"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testTrainingAndSavingReserveBottomActionBarAtMinimumWindowSize() async throws {
         let suite = "training-layout-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -61,5 +97,15 @@ final class TrainingWorkbenchLayoutTests: XCTestCase {
     private static func splitView(in view: NSView) -> NSSplitView? {
         if let split = view as? NSSplitView { return split }
         return view.subviews.lazy.compactMap { splitView(in: $0) }.first
+    }
+
+    private static func dropdown(in view: NSView) -> NSPopUpButton? {
+        if let dropdown = view as? NSPopUpButton { return dropdown }
+        return view.subviews.lazy.compactMap { dropdown(in: $0) }.first
+    }
+
+    private static func numberField(in view: NSView) -> NSTextField? {
+        if let field = view as? NSTextField, field.isEditable { return field }
+        return view.subviews.lazy.compactMap { numberField(in: $0) }.first
     }
 }

@@ -67,7 +67,7 @@ final class NativePNGTests: XCTestCase {
         } }
     }
 
-    func testPlanarModelSamplesKeepExactFloatConversionAndRejectInvalidScalarOrAlpha() throws {
+    func testPlanarModelSamplesKeepExactFloatConversionAndRejectInvalidScalar() throws {
         for bits in [8, 16] {
             let maximum = bits == 16 ? 65535 : 255
             let values = [0, maximum / 2, maximum, maximum, maximum / 4, maximum * 3 / 4]
@@ -79,8 +79,78 @@ final class NativePNGTests: XCTestCase {
             XCTAssertEqual(png.pixels, bytes)
             XCTAssertThrowsError(try png.modelFloatSamples(role: "roughness"))
         }
-        let transparent = NativePNG(header: .init(width: 1, height: 1, bits: 8, channels: 4, color: 6, interlace: 0), pixels: Data([128, 128, 255, 0]), colorChunks: [])
-        XCTAssertThrowsError(try transparent.modelFloatSamples(role: "normal"))
+    }
+
+    func testPlanarTrainingUsesUnassociatedSamplesRegardlessOfAlphaAtBothPrecisions() throws {
+        for bits in [8, 16] {
+            let maximum = bits == 16 ? 65535 : 255
+            for (color, channels) in [(UInt8(4), 2), (6, 4)] {
+                var pixels = Data()
+                let codes = [maximum / 4, maximum / 2, maximum * 3 / 4]
+                for (pixel, opacity) in [0, maximum / 2, maximum].enumerated() {
+                    let values = [Int](repeating: codes[pixel], count: channels - 1) + [opacity]
+                    for code in values {
+                        if bits == 16 { pixels.append(UInt8(code >> 8)) }
+                        pixels.append(UInt8(truncatingIfNeeded: code))
+                    }
+                }
+                let source = NativePNG(header: .init(width: 3, height: 1, bits: bits, channels: channels, color: color, interlace: 0),
+                                       pixels: pixels, colorChunks: [])
+                let decoded = try NativePNG.decode(source.encoded())
+                let expected = codes.map { Float($0) / Float(maximum) }
+                XCTAssertEqual(try decoded.modelFloatSamples(role: "roughness"), expected)
+                if bits == 16 { XCTAssertEqual(try decoded.modelFloatSamples(role: "height"), expected) }
+                if channels == 4 {
+                    XCTAssertEqual(try decoded.modelFloatSamples(role: "input", encoding: "srgb"), expected + expected + expected)
+                    XCTAssertEqual(try decoded.modelFloatSamples(role: "normal"), expected + expected + expected)
+                }
+                let crop = try NativePNG.crop(source.encoded(), rectangle: [0, 0, 2, 1])
+                XCTAssertEqual(crop.pixels, pixels.prefix(2 * source.header.bytesPerPixel))
+                XCTAssertEqual(crop.header.width, 2, "Transparent source pixels do not trim the selected native rectangle")
+                XCTAssertEqual(source.pixels, pixels, "Tensor conversion leaves color and alpha untouched")
+            }
+        }
+    }
+
+    func testNativeColorKeyTransparencyIsPreservedAndIgnoredForPlanarTraining() throws {
+        for bits in [8, 16] { for (color, channels) in [(UInt8(0), 1), (2, 3)] {
+            let maximum = bits == 16 ? 65535 : 255, code = maximum / 3
+            let key = Data((0..<channels).flatMap { _ in [UInt8(code >> 8), UInt8(truncatingIfNeeded: code)] })
+            let pixels = Data((0..<channels * 2).flatMap { _ in bits == 16 ? [UInt8(code >> 8), UInt8(truncatingIfNeeded: code)] : [UInt8(code)] })
+            let source = NativePNG(header: .init(width: 2, height: 1, bits: bits, channels: channels, color: color, interlace: 0),
+                                   pixels: pixels, colorChunks: [("tRNS", key)])
+            let encoded = try source.encoded(), decoded = try NativePNG.decode(encoded)
+            XCTAssertEqual(try NativePNG.sourceMetadata(encoded)["channels"] as? Int, channels)
+            XCTAssertEqual(decoded.pixels, pixels)
+            XCTAssertEqual(decoded.colorChunks.first?.1, key)
+            XCTAssertEqual(try decoded.modelFloatSamples(role: "roughness"), [Float(code) / Float(maximum), Float(code) / Float(maximum)])
+            let crop = try NativePNG.crop(encoded, rectangle: [1, 0, 1, 1])
+            XCTAssertEqual(crop.colorChunks.first?.1, key)
+            XCTAssertEqual(try NativePNG.decode(crop.encoded()).colorChunks.first?.1, key)
+            if channels == 3 {
+                var complemented = key
+                complemented[2] = UInt8((maximum - code) >> 8); complemented[3] = UInt8(truncatingIfNeeded: maximum - code)
+                for flipped in [try source.crop([1, 0, 1, 1], flipGreen: true), try NativePNG.crop(encoded, rectangle: [1, 0, 1, 1], flipGreen: true)] {
+                    XCTAssertEqual(flipped.colorChunks.first?.1, complemented, "Normal convention conversion preserves the transparency key")
+                    XCTAssertEqual(try flipped.crop([0, 0, 1, 1], flipGreen: true).colorChunks.first?.1, key)
+                }
+            }
+        } }
+    }
+
+    func testInvalidTransparencyMetadataStillRejectsCorruptPNG() throws {
+        for (color, channels, chunks) in [
+            (UInt8(0), 1, [("tRNS", Data([1, 0]))]), // An 8-bit key cannot exceed 255.
+            (2, 3, [("tRNS", Data([0, 17]))]), // RGB needs three key codes.
+            (4, 2, [("tRNS", Data([0, 17]))]), // GA already has an alpha channel.
+            (0, 1, [("tRNS", Data([0, 17])), ("tRNS", Data([0, 17]))])
+        ] {
+            let header = NativePNG.Header(width: 1, height: 1, bits: 8, channels: channels, color: color, interlace: 0)
+            let encoded = try independentPNG(header: header, codes: Data(repeating: 17, count: channels), filter: 0, interlace: 0, metadata: chunks)
+            XCTAssertThrowsError(try NativePNG.decode(encoded))
+            XCTAssertThrowsError(try NativePNG.sourceMetadata(encoded))
+            XCTAssertThrowsError(try NativePNG.crop(encoded, rectangle: [0, 0, 1, 1]))
+        }
     }
 
     func testInvalidStorageAndUnknownFiltersFailBeforeUnsafeBufferAccess() throws {
@@ -117,7 +187,7 @@ final class NativePNGTests: XCTestCase {
 
     // Deliberately independent Array implementation produces filtered/Adam7
     // fixtures, so native buffer restoration is checked against raw codes.
-    private func independentPNG(header: NativePNG.Header, codes: Data, filter: UInt8, interlace: UInt8, idatChunkBytes: Int = Int.max) throws -> Data {
+    private func independentPNG(header: NativePNG.Header, codes: Data, filter: UInt8, interlace: UInt8, idatChunkBytes: Int = Int.max, metadata: [(String, Data)] = []) throws -> Data {
         let passes = interlace == 0 ? [(0, 0, 1, 1)] : [(0, 0, 8, 8), (4, 0, 8, 8), (0, 4, 4, 8), (2, 0, 4, 4), (0, 2, 2, 4), (1, 0, 2, 2), (0, 1, 1, 2)]
         var filtered = Data()
         for (x, y, dx, dy) in passes {
@@ -162,6 +232,7 @@ final class NativePNGTests: XCTestCase {
         }
         let ihdr = bigEndian(UInt32(header.width)) + bigEndian(UInt32(header.height)) + Data([UInt8(header.bits), header.color, 0, 0, interlace])
         var output = Data([137, 80, 78, 71, 13, 10, 26, 10]) + chunk("IHDR", ihdr)
+        for (kind, data) in metadata { output.append(chunk(kind, data)) }
         var position = 0
         while position < compressed.count {
             let count = min(idatChunkBytes, compressed.count - position)

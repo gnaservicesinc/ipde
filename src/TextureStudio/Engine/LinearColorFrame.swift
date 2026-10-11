@@ -51,10 +51,11 @@ struct LinearColorFrame {
         var fallback: [Float] = []
         ratios.reserveCapacity(base.count / 4)
         for index in stride(from: 0, to: base.count, by: 4) {
-            let a = base[index] * 0.2126 + base[index + 1] * 0.7152 + base[index + 2] * 0.0722
-            let b = expanded[index] * 0.2126 + expanded[index + 1] * 0.7152 + expanded[index + 2] * 0.0722
-            if a.isFinite, b.isFinite, a > 0.0001, b > 0.00001,
-               base[index + 3] > 0.99, expanded[index + 3] > 0.99 {
+            let baseAlpha = base[index + 3], hdrAlpha = expanded[index + 3]
+            guard baseAlpha.isFinite, hdrAlpha.isFinite, baseAlpha > 1e-6, hdrAlpha > 1e-6 else { continue }
+            let a = (base[index] * 0.2126 + base[index + 1] * 0.7152 + base[index + 2] * 0.0722) / baseAlpha
+            let b = (expanded[index] * 0.2126 + expanded[index + 1] * 0.7152 + expanded[index + 2] * 0.0722) / hdrAlpha
+            if a.isFinite, b.isFinite, a > 0.0001, b > 0.00001 {
                 let ratio = a / b
                 fallback.append(ratio)
                 if a > 0.01, a < 0.8 { ratios.append(ratio) }

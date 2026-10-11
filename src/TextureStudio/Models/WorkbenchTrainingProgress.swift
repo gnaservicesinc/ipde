@@ -34,6 +34,7 @@ struct WorkbenchTrainingProgress: Equatable, Sendable {
     var gradientAccumulationSteps = 1
     var lastLoss: Double?
     var validationError: Double?
+    var skippedSampleCount = 0
 
     var fractionCompleted: Double {
         totalUpdates > 0 ? Double(completedUpdates) / Double(totalUpdates) : 0
@@ -60,6 +61,7 @@ struct WorkbenchTrainingProgress: Equatable, Sendable {
     mutating func consume(_ event: [String: Any]) {
         guard let kind = event["event"] as? String else { return }
         if let value = event["completed_updates"] as? Int, value >= 0 { completedUpdates = value }
+        if let value = event["skipped_sample_count"] as? Int, value >= 0 { skippedSampleCount = value }
         if let value = event["requested_updates"] as? Int, value >= 0 { totalUpdates = value }
         if let value = event["current_update"] as? Int, value >= 0 { currentUpdate = value }
         if let value = event["initial_step"] as? Int, value >= 0 { initialStep = value }
@@ -137,7 +139,13 @@ struct WorkbenchTrainingProgress: Equatable, Sendable {
             else { samplePosition = 0; sampleTotal = event["sample_count"] as? Int ?? 0; sampleID = nil }
         case "validation":
             validationError = event["mae"] as? Double
-            operationLabel = "Validation completed"; clearStageAndSample()
+            operationLabel = event["status"] as? String == "unavailable" ? "Validation unavailable; saving can continue" : "Validation completed"
+            clearStageAndSample()
+        case "sample_skipped":
+            operationLabel = "Skipped problematic sample"
+            operationDetail = event["error"] as? String ?? ""
+            setSample(event)
+            stageCompleted = 0; stageTotal = 0
         case "checkpoint_started":
             state = .checkpoint
             operationLabel = "Writing checkpoint"; operationDetail = ""; clearStageAndSample()
@@ -145,7 +153,11 @@ struct WorkbenchTrainingProgress: Equatable, Sendable {
             state = .checkpoint
             operationLabel = "Checkpoint saved"; operationDetail = ""; clearStageAndSample()
         case "training_stopped":
-            operationDetail = event["stopped_reason"] as? String == "time_limit" ? "Time limit reached; saving completed steps" : "Stopping and saving completed steps"
+            switch event["stopped_reason"] as? String {
+            case "time_limit": operationDetail = "Time limit reached; saving completed steps"
+            case "no_valid_training_samples": operationDetail = "No valid training samples remain; saving completed steps"
+            default: operationDetail = "Stopping and saving completed steps"
+            }
         case "export_started":
             state = .export; phaseIndex = 4
             operationLabel = "Exporting material model"; operationDetail = ""; clearStageAndSample()

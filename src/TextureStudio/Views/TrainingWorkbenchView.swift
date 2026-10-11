@@ -121,11 +121,13 @@ struct TrainingWorkbenchView: View {
                         Text(validation.enabled ? (validation.quickCount == 0 ? "Quick checks are off. The configured validation pool is checked when saving." : "Up to \(validation.quickCount) crops per quick check; the configured validation pool is checked when saving.") : "Validation is off in Dataset Info.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
-                    NumericField("Quick check every", value: $store.training.validationEvery, atLeast: 0, unit: "updates")
+                    TrainingIntervalField("Quick check every", value: $store.training.validationEvery, unit: $store.training.validationUnit)
                     Text("0 turns off periodic quick checks.")
                         .font(.caption).foregroundStyle(.secondary)
-                    NumericField("Save checkpoint every", value: $store.training.checkpointEvery, atLeast: 0, unit: "updates")
-                    Text("0 saves on request and at final export. Saving checks the full validation pool when validation is enabled. Save Checkpoint Now finishes the current update, saves, and continues training.")
+                    TrainingIntervalField("Save checkpoint every", value: $store.training.checkpointEvery, unit: $store.training.checkpointUnit)
+                    Text("An epoch is one complete pass through the training materials. A step is one optimizer update. Each interval uses its selected unit.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("0 saves on request and at final export. Saving checks the full validation pool when validation is enabled. Save Checkpoint Now finishes the current step, saves, and continues training.")
                         .font(.caption).foregroundStyle(.secondary)
                 }.disabled(store.isBusy)
                 if developerMode {
@@ -187,6 +189,36 @@ struct TrainingWorkbenchView: View {
           .accessibilityIdentifier("training.actions")
         }
         .sheet(isPresented: $showCheckpoints) { CheckpointLibraryView(store: store).frame(minWidth: 780, minHeight: 560) }
+    }
+}
+
+struct TrainingIntervalField: View {
+    let title: String
+    @Binding var value: Int
+    @Binding var unit: MaterialTrainingIntervalUnit
+
+    init(_ title: String, value: Binding<Int>, unit: Binding<MaterialTrainingIntervalUnit>) {
+        self.title = title
+        _value = value
+        _unit = unit
+    }
+
+    var body: some View {
+        LabeledContent(title) {
+            HStack(spacing: 8) {
+                NumericTextField(title: title, value: $value, atLeast: 0)
+                    .frame(width: 90)
+                Picker("\(title) unit", selection: $unit) {
+                    ForEach(MaterialTrainingIntervalUnit.allCases, id: \.self) { choice in
+                        Text(choice.label).tag(choice)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(width: 78)
+                .accessibilityLabel("\(title) unit")
+            }
+        }
     }
 }
 

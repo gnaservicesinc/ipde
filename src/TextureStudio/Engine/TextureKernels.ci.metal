@@ -8,7 +8,10 @@ extern "C" { namespace coreimage {
     float4 textureDelight(sample_t photo, sample_t lighting, float target, float strength, float hdrInput) {
         float illumination = max(textureLuminance(lighting.rgb / max(lighting.a, 1e-6f)), 0.005f);
         float gain = clamp(target / illumination, 0.4f, 2.5f);
-        float3 result = max(photo.rgb * pow(gain, strength), 0.0f);
+        // Color transforms work on straight color, while Core Image samples and
+        // returns premultiplied color. Source opacity is independent of crop.
+        float3 color = photo.rgb / max(photo.a, 1e-6f);
+        float3 result = max(color * pow(gain, strength), 0.0f);
         if (hdrInput > 0.5f) {
             float peak = max(result.r, max(result.g, result.b));
             if (peak > 0.85f) {
@@ -19,14 +22,15 @@ extern "C" { namespace coreimage {
             }
         }
         result = clamp(result, 0.0f, 1.0f);
-        return float4(result, 1.0f);
+        return float4(result * photo.a, photo.a);
     }
 
     float4 textureHeight(sample_t baseHeight, sample_t photo, sample_t lowPhoto, float photoStrength) {
         // Apple's fast Gaussian can quantize intermediate samples even in a float context.
         // Unpremultiply its weight sum and suppress its sub-0.05% numerical contrast floor
         // so a flat photograph does not acquire false bumps or roughness stripes.
-        float contrast = textureLuminance(photo.rgb) - textureLuminance(lowPhoto.rgb / max(lowPhoto.a, 1e-6f));
+        float contrast = photo.a > 1e-6f ? textureLuminance(photo.rgb / photo.a)
+            - textureLuminance(lowPhoto.rgb / max(lowPhoto.a, 1e-6f)) : 0.0f;
         float detail = sign(contrast) * max(abs(contrast) - 0.0005f, 0.0f) * 3.0f;
         // The registered depth establishes all geometry by default. Photo contrast
         // can only add explicitly requested artistic relief; colour is not height.
@@ -36,7 +40,9 @@ extern "C" { namespace coreimage {
 
     float4 textureRoughness(sample_t photo, sample_t lowPhoto, float base, float detailStrength) {
         // An editable material estimate; a single colour photograph cannot measure roughness.
-        float localContrast = max(abs(textureLuminance(photo.rgb) - textureLuminance(lowPhoto.rgb / max(lowPhoto.a, 1e-6f))) - 0.0005f, 0.0f);
+        float contrast = photo.a > 1e-6f ? textureLuminance(photo.rgb / photo.a)
+            - textureLuminance(lowPhoto.rgb / max(lowPhoto.a, 1e-6f)) : 0.0f;
+        float localContrast = max(abs(contrast) - 0.0005f, 0.0f);
         float roughness = clamp(base + localContrast * detailStrength * 4.0f, 0.02f, 1.0f);
         return float4(roughness, roughness, roughness, 1.0f);
     }

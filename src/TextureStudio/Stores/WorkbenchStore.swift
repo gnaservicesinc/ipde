@@ -680,6 +680,7 @@ final class WorkbenchStore {
                 "--max-minutes", String(options.maxMinutes),
                 "--updates-per-map", String(options.updatesPerCrop),
                 "--validation-every", String(options.validationEvery), "--checkpoint-every", String(options.checkpointEvery),
+                "--validation-unit", options.validationUnit.rawValue, "--checkpoint-unit", options.checkpointUnit.rawValue,
                 "--lora-rank", String(options.loraRank), "--lora-alpha", String(options.loraAlpha),
                 "--learning-rate", String(options.learningRate),
                 "--gradient-accumulation-steps", String(options.gradientAccumulationSteps),
@@ -863,18 +864,29 @@ final class WorkbenchStore {
                     activity = [progress.currentUpdateSummary, progress.operationDetail.isEmpty ? nil : progress.operationDetail,
                         progress.operationLabel, progress.stageSummary].compactMap { $0 }.joined(separator: " · ")
                 }
+            case "sample_skipped":
+                if !isStopping {
+                    let sample = event["sample_id"] as? String ?? "sample"
+                    let reason = event["error"] as? String
+                    activity = "Skipped \(sample)" + (reason.map { ": \($0)" } ?? "") + " · Training continues…"
+                }
             case "checkpoint_saved":
                 if let checkpoint = try? WorkbenchResult.decode(WorkbenchCheckpoint.self, output: line) {
                     if !checkpoints.contains(where: { $0.id == checkpoint.id }) { checkpoints.append(checkpoint) }
                     preferences.set(checkpoints.map(\.checkpointPath), forKey: "checkpoints")
                 }
                 isCheckpointPending = false
-                if !isStopping { activity = "Checkpoint saved after full validation. Training continues…" }
+                if !isStopping { activity = "Checkpoint saved. Training continues…" }
             case "validation":
                 let count = event["sample_count"] as? Int ?? 0
                 let pool = event["pool_count"] as? Int ?? 0
+                let skipped = max(0, event["validation_skipped_sample_count"] as? Int ?? 0)
+                let label = event["scope"] as? String == "full" ? "Full validation" : "Quick check"
+                let skippedSummary = skipped > 0 ? " · \(skipped) skipped" : ""
                 if let error = event["mae"] as? Double {
-                    validationSummary = "\(event["scope"] as? String == "full" ? "Full validation" : "Quick check"): \(count)/\(pool) crops · error \(error.formatted(.number.precision(.fractionLength(6))))"
+                    validationSummary = "\(label): \(count)/\(pool) crops · error \(error.formatted(.number.precision(.fractionLength(6))))\(skippedSummary)"
+                } else if event["status"] as? String == "unavailable" {
+                    validationSummary = "\(label) unavailable: \(count)/\(pool) crops\(skippedSummary). Training and saving continue."
                 } else { validationSummary = "" }
             default: break
             }

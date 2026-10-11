@@ -44,6 +44,15 @@ final class LinearColorFrameTests: XCTestCase {
             hdr: image([0.04, 0.04, 0.04, 1]), context: context), 0.125, accuracy: 0.0001)
     }
 
+    func testExposureAnchorUsesVisibleStraightColorAndExcludesZeroAlpha() {
+        let context = CIContext(options: [.workingFormat: CIFormat.RGBAf, .workingColorSpace: linear])
+        XCTAssertEqual(LinearColorFrame.exposureGain(reference: image([0.05, 0.075, 0.1, 0.25]),
+            hdr: image([0.8, 1.2, 1.6, 0.5]), context: context), 0.125, accuracy: 0.0001,
+                       "Different source alpha values do not change HDR exposure matching")
+        XCTAssertEqual(LinearColorFrame.exposureGain(reference: image([0, 0, 0, 0]),
+            hdr: image([0, 0, 0, 0]), context: context), 1)
+    }
+
     private func image(_ rgba: [Float]) -> CIImage {
         CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) }, bytesPerRow: 16,
             size: CGSize(width: 1, height: 1), format: .RGBAf, colorSpace: linear)

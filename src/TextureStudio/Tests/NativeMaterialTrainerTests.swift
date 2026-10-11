@@ -5,6 +5,119 @@ import XCTest
 @testable import TextureStudio
 
 final class NativeMaterialTrainerTests: XCTestCase {
+    func testCadenceUsesEpochByDefaultAndRejectsRetiredOrInvalidUnits() throws {
+        let arguments = ["train", "--dataset", "/dataset", "--output", "/output"]
+        let options = try NativeMaterialTrainer.Options(arguments)
+        XCTAssertEqual(options.validationEvery, 1)
+        XCTAssertEqual(options.validationUnit, .epoch)
+        XCTAssertEqual(options.checkpointUnit, .epoch)
+        for flag in ["--validation-unit", "--checkpoint-unit"] {
+            for unit in ["updates", "invalid", ""] {
+                XCTAssertThrowsError(try NativeMaterialTrainer.Options(arguments + [flag, unit]))
+            }
+        }
+        XCTAssertFalse(NativeMaterialTrainer.cadenceDue(every: 2, unit: .epoch, steps: 8, epochs: 1, epochBoundary: false))
+        XCTAssertTrue(NativeMaterialTrainer.cadenceDue(every: 2, unit: .epoch, steps: 8, epochs: 2, epochBoundary: true))
+        XCTAssertTrue(NativeMaterialTrainer.cadenceDue(every: 2, unit: .step, steps: 8, epochs: 1, epochBoundary: false))
+        XCTAssertFalse(NativeMaterialTrainer.cadenceDue(every: 2, unit: .step, steps: 8, epochs: 2, epochBoundary: true))
+    }
+
+    func testEpochAndStepCadenceTriggerAtDifferentSuccessfulBoundaries() async throws {
+        try XCTSkipIf(MTLCreateSystemDefaultDevice() == nil)
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let dataset = root.appendingPathComponent("dataset")
+        try datasetFixture(dataset, trainingCount: 2)
+        for unit in ["epoch", "step"] {
+            let output = root.appendingPathComponent(unit), model = try trainerModel(), events = Recorder()
+            let options = try NativeMaterialTrainer.Options(["train", "--dataset", dataset.path, "--output", output.path,
+                "--size", "256", "--updates-per-map", "3", "--validation-every", "1", "--validation-unit", unit,
+                "--checkpoint-every", "2", "--checkpoint-unit", unit])
+            _ = try await Task.detached { try NativeMaterialTrainer.train(options, onEvent: events.append, control: .init(), model: model) }.value
+            let saves = events.events.filter { $0["event"] as? String == "checkpoint_saved" }.compactMap { $0["completed_updates"] as? Int }
+            let quick = events.events.filter { $0["event"] as? String == "validation" && $0["context"] as? String == "periodic" }.compactMap { $0["completed_updates"] as? Int }
+            XCTAssertEqual(saves, unit == "epoch" ? [4, 6] : [2, 4, 6])
+            XCTAssertEqual(quick, unit == "epoch" ? [2, 6] : [1, 3, 5])
+        }
+    }
+
+    func testMalformedAndChangedTrainingMapsAreQuarantinedAcrossEpochs() async throws {
+        try XCTSkipIf(MTLCreateSystemDefaultDevice() == nil)
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let dataset = root.appendingPathComponent("dataset"), output = root.appendingPathComponent("trained")
+        try datasetFixture(dataset, validationEnabled: false, trainingCount: 3)
+        try Data("changed".utf8).write(to: dataset.appendingPathComponent("samples/train-0/diffuse.png"))
+        let malformed = Data("malformed png".utf8), sampleURL = dataset.appendingPathComponent("samples/train-1/sample.json")
+        try malformed.write(to: dataset.appendingPathComponent("samples/train-1/diffuse.png"))
+        var sample = try NativeMaterialTransfer.object(sampleURL)
+        var metadata = try XCTUnwrap(sample["map_metadata"] as? [String: [String: Any]])
+        metadata["input"]?["sample_sha256"] = NativeMaterialTrainer.checksum(malformed)
+        sample["map_metadata"] = metadata
+        try JSONSerialization.data(withJSONObject: sample).write(to: sampleURL)
+        let model = try trainerModel(), events = Recorder()
+        let options = try NativeMaterialTrainer.Options(["train", "--dataset", dataset.path, "--output", output.path,
+            "--size", "256", "--updates-per-map", "2", "--checkpoint-every", "1"])
+        let text = try await Task.detached { try NativeMaterialTrainer.train(options, onEvent: events.append, control: .init(), model: model) }.value
+        let result = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "completed")
+        XCTAssertEqual(result["completed_updates"] as? Int, 2)
+        XCTAssertEqual(result["completed_epochs"] as? Int, 2)
+        XCTAssertEqual(result["skipped_sample_count"] as? Int, 2)
+        XCTAssertEqual(events.events.filter { $0["event"] as? String == "sample_skipped" }.count, 2)
+        XCTAssertEqual(events.events.filter { $0["event"] as? String == "update" }.compactMap { $0["sample_id"] as? String }, ["train-2", "train-2"])
+        XCTAssertNoThrow(try NativeMaterialPackage.verify(output.appendingPathComponent("export")))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("skipped-samples.json").path))
+    }
+
+    func testFinalValidationFailureStillPublishesTrainedCheckpointAndPackage() async throws {
+        try XCTSkipIf(MTLCreateSystemDefaultDevice() == nil)
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let dataset = root.appendingPathComponent("dataset"), output = root.appendingPathComponent("trained")
+        try datasetFixture(dataset)
+        let model = try trainerModel(), events = Recorder(), original = model.adapterWeights
+        let options = try NativeMaterialTrainer.Options(["train", "--dataset", dataset.path, "--output", output.path,
+            "--size", "256", "--updates-per-map", "2", "--validation-every", "0"])
+        let text = try await Task.detached { try NativeMaterialTrainer.train(options, onEvent: { line in
+            events.append(line)
+            if events.updates == 2 { try? FileManager.default.removeItem(at: dataset.appendingPathComponent("samples/validation/height.png")) }
+        }, control: .init(), model: model) }.value
+        let result = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "completed")
+        XCTAssertEqual(result["completed_updates"] as? Int, 2)
+        let validation = try XCTUnwrap(result["final_validation"] as? [String: Any])
+        XCTAssertEqual(validation["status"] as? String, "unavailable")
+        XCTAssertEqual(validation["sample_count"] as? Int, 0)
+        XCTAssertEqual(validation["validation_skipped_sample_count"] as? Int, 1)
+        XCTAssertTrue(validation["mae"] is NSNull)
+        let saved = try NativeSafetensors(contentsOf: output.appendingPathComponent("checkpoint-step-00000002.safetensors"))
+        XCTAssertNotEqual(try saved.tensorBytes(named: "ups.3.model.10.lora_B"), original["ups.3.model.10.lora_B"]!.bytes)
+        XCTAssertNoThrow(try NativeMaterialPackage.verify(output.appendingPathComponent("export")))
+    }
+
+    func testSkippedMicrobatchesFlushOnlyValidGradientsAndAllBadSamplesSaveProgress() async throws {
+        try XCTSkipIf(MTLCreateSystemDefaultDevice() == nil)
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let dataset = root.appendingPathComponent("dataset"), output = root.appendingPathComponent("trained")
+        try datasetFixture(dataset, validationEnabled: false)
+        let model = try trainerModel(), events = Recorder()
+        let options = try NativeMaterialTrainer.Options(["train", "--dataset", dataset.path, "--output", output.path,
+            "--size", "256", "--updates-per-map", "3", "--gradient-accumulation-steps", "3"])
+        let text = try await Task.detached { try NativeMaterialTrainer.train(options, onEvent: { line in
+            events.append(line)
+            if let event = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+               event["event"] as? String == "accumulation_sample", event["accumulation_step"] as? Int == 2 {
+                try? FileManager.default.removeItem(at: dataset.appendingPathComponent("samples/train/diffuse.png"))
+            }
+        }, control: .init(), model: model) }.value
+        let result = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "stopped")
+        XCTAssertEqual(result["stopped_reason"] as? String, "no_valid_training_samples")
+        XCTAssertEqual(result["completed_updates"] as? Int, 1)
+        XCTAssertEqual(result["sample_evaluations"] as? Int, 1)
+        XCTAssertEqual(result["skipped_sample_count"] as? Int, 1)
+        XCTAssertEqual(events.events.first { $0["event"] as? String == "update" }?["accumulated_samples"] as? Int, 1)
+        XCTAssertNoThrow(try NativeMaterialPackage.verify(output.appendingPathComponent("export")))
+    }
+
     func testAccumulationKeepsOptimizerStepPlanAndRecordsEffectiveCheckpointConfiguration() async throws {
         try XCTSkipIf(MTLCreateSystemDefaultDevice() == nil)
         let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
@@ -751,10 +864,10 @@ final class NativeMaterialTrainerTests: XCTestCase {
             layers: original.layers, configuration: configuration, baseSHA256: String(repeating: "a", count: 64), architecture: .test)
     }
     private func datasetFixture(_ root: URL, trainingInputCode: UInt8 = 127, validationCount: Int = 1,
-                                validationEnabled: Bool = true, quickCount: Int = 4) throws {
+                                validationEnabled: Bool = true, quickCount: Int = 4, trainingCount: Int = 1) throws {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         var entries: [[String: Any]] = []
-        let identities = [(id: "train", split: "train")] + (0..<validationCount).map {
+        let identities = (0..<trainingCount).map { (id: trainingCount == 1 ? "train" : "train-\($0)", split: "train") } + (0..<validationCount).map {
             (id: validationCount == 1 ? "validation" : "validation-\($0)", split: "validation")
         }
         for (id, split) in identities {

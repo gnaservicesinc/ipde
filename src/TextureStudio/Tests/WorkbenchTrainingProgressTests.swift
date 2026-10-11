@@ -2,6 +2,22 @@ import XCTest
 @testable import TextureStudio
 
 final class WorkbenchTrainingProgressTests: XCTestCase {
+    func testSampleSkipsRemainVisibleThroughUnavailableValidationAndSaving() {
+        var progress = WorkbenchTrainingProgress()
+        progress.consume(["event": "sample_skipped", "sample_id": "bad-map", "error": "Unreadable image",
+            "skipped_sample_count": 1, "completed_updates": 4])
+        XCTAssertEqual(progress.skippedSampleCount, 1)
+        XCTAssertEqual(progress.completedUpdates, 4)
+        XCTAssertEqual(progress.operationDetail, "Unreadable image")
+        progress.consume(["event": "validation", "status": "unavailable", "mae": NSNull()])
+        XCTAssertNil(progress.validationError)
+        XCTAssertTrue(progress.operationLabel.contains("saving can continue"))
+        progress.consume(["event": "checkpoint_saved"])
+        progress.consume(["event": "training_completed", "status": "completed"])
+        XCTAssertEqual(progress.state, .completed)
+        XCTAssertEqual(progress.skippedSampleCount, 1)
+    }
+
     func testUpdateTimingAndAccumulationAreIndependentOfOptimizerStepCount() {
         var progress = WorkbenchTrainingProgress()
         progress.consume(["event": "training_started", "gradient_accumulation_steps": 4, "learning_rate": 0.00001])

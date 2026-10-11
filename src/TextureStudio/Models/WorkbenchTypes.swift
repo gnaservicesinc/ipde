@@ -283,6 +283,13 @@ struct WorkbenchCheckpoint: Decodable, Identifiable, Sendable {
     }
 }
 
+enum MaterialTrainingIntervalUnit: String, Codable, CaseIterable, Hashable, Sendable {
+    case epoch
+    case step
+
+    var label: String { rawValue }
+}
+
 struct MaterialTrainingOptions: Codable, Equatable, Sendable {
     var modelName = ""
     var target = "height"
@@ -306,13 +313,16 @@ struct MaterialTrainingOptions: Codable, Equatable, Sendable {
     var minimumLearningRateRatio = 0.1
     var warmupUpdates = 0
     var seed: UInt64 = 17
-    var validationEvery = 20
+    var validationEvery = 1
+    var validationUnit: MaterialTrainingIntervalUnit = .epoch
     var checkpointEvery = 0
+    var checkpointUnit: MaterialTrainingIntervalUnit = .epoch
 
     init() {}
 
     enum CodingKeys: String, CodingKey {
         case modelName, target, scope, size, updatesPerCrop, maxMinutes, useSelectedMaterialOnly, useWarmStart, loraRank, loraAlpha, validationEvery, checkpointEvery
+        case validationUnit, checkpointUnit
         case learningRate, gradientAccumulationSteps, optimizer, optimizerBeta1, optimizerBeta2, optimizerEpsilon, weightDecay, maxGradientNorm, learningRateSchedule, minimumLearningRateRatio, warmupUpdates, seed
     }
 
@@ -342,7 +352,13 @@ struct MaterialTrainingOptions: Codable, Equatable, Sendable {
         warmupUpdates = try values.decodeIfPresent(Int.self, forKey: .warmupUpdates) ?? warmupUpdates
         seed = try values.decodeIfPresent(UInt64.self, forKey: .seed) ?? seed
         validationEvery = try values.decodeIfPresent(Int.self, forKey: .validationEvery) ?? validationEvery
+        // Existing saved schedules counted optimizer updates. Preserve their
+        // frequency as steps while new or partial settings default to epochs.
+        validationUnit = try values.decodeIfPresent(MaterialTrainingIntervalUnit.self, forKey: .validationUnit) ??
+            (values.contains(.validationEvery) ? .step : .epoch)
         checkpointEvery = try values.decodeIfPresent(Int.self, forKey: .checkpointEvery) ?? checkpointEvery
+        checkpointUnit = try values.decodeIfPresent(MaterialTrainingIntervalUnit.self, forKey: .checkpointUnit) ??
+            (values.contains(.checkpointEvery) ? .step : .epoch)
     }
 
     /// Preserve supported choices when reopening on another Mac.

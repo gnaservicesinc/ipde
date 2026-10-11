@@ -32,6 +32,7 @@ enum NativeMaterialTrainer {
         let modelName: String?
         let dataset: URL?, output: URL, image: URL?, checkpoint: URL?, expectedSHA256: String?, base: URL
         let size: Int, rank: Int, updatesPerMap: Int, validationEvery: Int, checkpointEvery: Int
+        let validationUnit: MaterialTrainingIntervalUnit, checkpointUnit: MaterialTrainingIntervalUnit
         let alpha: Float, learningRate: Float, maxMinutes: Double
         let gradientAccumulationSteps: Int, warmupUpdates: Int
         let learningRateSchedule: String, minimumLearningRateRatio: Float
@@ -81,8 +82,13 @@ enum NativeMaterialTrainer {
                 maxGradientNorm: nonnegative("--max-gradient-norm", default: 1))
             updatesPerMap = Int(value("--updates-per-map") ?? "100") ?? 0
             maxMinutes = Double(value("--max-minutes") ?? "30") ?? .nan
-            validationEvery = Int(value("--validation-every") ?? "20") ?? -1
+            validationEvery = Int(value("--validation-every") ?? "1") ?? -1
             checkpointEvery = Int(value("--checkpoint-every") ?? "0") ?? -1
+            guard let validationUnit = MaterialTrainingIntervalUnit(rawValue: value("--validation-unit") ?? "epoch"),
+                  let checkpointUnit = MaterialTrainingIntervalUnit(rawValue: value("--checkpoint-unit") ?? "epoch") else {
+                throw StudioError("Validation and checkpoint intervals must use epoch or step.")
+            }
+            self.validationUnit = validationUnit; self.checkpointUnit = checkpointUnit
             guard let parsedSeed = UInt64(value("--seed") ?? "17") else { throw StudioError("The training seed must be a nonnegative 64-bit integer.") }
             seed = parsedSeed
             materials = arguments.indices.filter { arguments[$0] == "--material" && arguments.indices.contains($0 + 1) }.map { arguments[$0 + 1] }
@@ -118,6 +124,9 @@ enum NativeMaterialTrainer {
                 "warmup_updates": warmupUpdates, "seed": seed, "precision": "Float32",
                 "value_loss_weight": 1, "detail_loss_weight": 4,
                 "optimizer_state_restored": false,
+                "validation_every": validationEvery, "validation_unit": validationUnit.rawValue,
+                "checkpoint_every": checkpointEvery, "checkpoint_unit": checkpointUnit.rawValue,
+                "sample_failure_policy": "Quarantine unreadable, changed, malformed or nonfinite samples for this run; continue with valid samples and save without requiring successful validation.",
                 "gradient_accumulation_policy": "Average gradients over evaluated maps, then clip once and apply one optimizer update; stop-and-save and the deadline flush a partial group."
             ]) { _, new in new }
         }
@@ -228,6 +237,8 @@ enum NativeMaterialTrainer {
         var accumulationRandom = NativeMaterialRandom(seed: options.seed ^ 0x9e3779b97f4a7c15)
         var sampleEvaluations = 0, accumulationOrder: [Int] = [], accumulationPosition = 0
         var currentEpoch = 0, activeUpdate = false, workflowPhase = 3
+        var completedEpochs = 0
+        var quarantined = Set<String>(), skippedSamples: [[String: Any]] = []
         let initialStep = model.configuration["step"] as? Int ?? 0
         var optimizer: [String: NativeTensor] = [:], checkpoints: [[String: Any]] = [], history: [[String: Any]] = []
         var lastSavedStep = -1, lastValidation: [String: Any] = [:]
@@ -240,6 +251,7 @@ enum NativeMaterialTrainer {
         func timeLimitReached() -> Bool { elapsedSeconds() / 60 >= options.maxMinutes }
         func stoppedReason() -> String? {
             if control.shouldStopAndSave { return "user_stop" }
+            if training.allSatisfy({ quarantined.contains("train:" + $0.id) }) { return "no_valid_training_samples" }
             return completed < requestedUpdates && timeLimitReached() ? "time_limit" : nil
         }
         func emit(_ event: [String: Any]) throws {
@@ -247,6 +259,8 @@ enum NativeMaterialTrainer {
             event["elapsed_training_seconds"] = elapsedSeconds()
             event["completed_updates"] = completed
             event["sample_evaluations"] = sampleEvaluations
+            event["skipped_sample_count"] = skippedSamples.count
+            event["completed_epochs"] = completedEpochs
             event["gradient_accumulation_steps"] = options.gradientAccumulationSteps
             event["requested_updates"] = requestedUpdates
             event["current_update"] = activeUpdate ? completed + 1 : completed
@@ -271,9 +285,29 @@ enum NativeMaterialTrainer {
             let reference = try target.modelFloatSamples(role: options.target, normalConvention: descriptor.targetConvention)
             return (rgb, reference)
         }
+        func quarantine(_ sample: NativeMaterialDatasetService.TrainingSample, phase: String, error: Error) throws {
+            // An explicit Abort or task cancellation always wins over recovery.
+            if error is CancellationError { throw error }
+            try control.check()
+            guard quarantined.insert(sample.split + ":" + sample.id).inserted else { return }
+            let issue: [String: Any] = ["sample_id": sample.id, "split": sample.split,
+                "phase": phase, "error": error.localizedDescription,
+                "input_path": sample.inputURL.path, "target_path": sample.targetURL.path,
+                "step": initialStep + completed, "epoch": currentEpoch]
+            skippedSamples.append(issue)
+            try writeJSON(["samples": skippedSamples], to: options.output.appendingPathComponent("skipped-samples.json"))
+            try emit(issue.merging(["event": "sample_skipped", "operation": "Skipping problematic sample"]) { _, new in new })
+        }
+        func availablePair(_ sample: NativeMaterialDatasetService.TrainingSample, phase: String) throws -> ([Float], [Float])? {
+            try control.check()
+            guard !quarantined.contains(sample.split + ":" + sample.id) else { return nil }
+            do { return try pair(sample) }
+            catch { try quarantine(sample, phase: phase, error: error); return nil }
+        }
         func check(full: Bool, context: String) throws -> [String: Any] {
             var errors: [[String: Any]] = [], sum = Double(0)
-            let selected = full ? validation : Array(validation.prefix(quickCount))
+            let available = validation.filter { !quarantined.contains($0.split + ":" + $0.id) }
+            let selected = full ? available : Array(available.prefix(quickCount))
             if !selected.isEmpty {
                 try emit(["event": "validation_started", "scope": full ? "full" : "quick", "context": context,
                     "sample_count": selected.count, "pool_count": validation.count])
@@ -282,8 +316,8 @@ enum NativeMaterialTrainer {
                 try emit(["event": "validation_sample", "scope": full ? "full" : "quick", "context": context,
                     "sample_id": sample.id, "sample_position": position + 1, "sample_total": selected.count,
                     "operation": "Loading validation maps"])
-                let mae = try autoreleasepool {
-                    let data = try pair(sample)
+                let mae: Double? = try autoreleasepool {
+                    guard let data = try availablePair(sample, phase: "validation") else { return nil }
                     let result = try program.execute(rgb: data.0, adapters: model.adapterWeights, reference: data.1,
                         featureKey: sample.inputSHA256 + ":" + sample.inputEncoding, checkCancellation: { try control.check() }, onStage: { done, total in
                             if done == 1 || done % 10 == 0 || done == total {
@@ -293,16 +327,22 @@ enum NativeMaterialTrainer {
                             try? emit(["event": "operation_progress", "phase": "validation", "operation": operation,
                                 "completed": done, "total": total])
                         })
-                    return Double(result.valueLoss!)
+                    guard let loss = result.valueLoss, loss.isFinite else {
+                        try quarantine(sample, phase: "validation", error: StudioError("The validation sample produced a nonfinite loss."))
+                        return nil
+                    }
+                    return Double(loss)
                 }
+                guard let mae else { continue }
                 errors.append(["sample_id": sample.id, "mae": mae]); sum += mae
             }
             let result: [String: Any] = ["event": "validation", "status": !validationEnabled ? "disabled" : errors.isEmpty ? "unavailable" : "checked",
                 "scope": full ? "full" : "quick", "context": context, "sample_count": errors.count, "pool_count": validation.count,
+                "validation_skipped_sample_count": validation.filter { quarantined.contains($0.split + ":" + $0.id) }.count,
                 "mae": errors.isEmpty ? NSNull() : sum / Double(errors.count), "samples": errors,
                 "step": initialStep + completed, "reference": "Teacher/source agreement, not measured material accuracy"]
             history.append(result); if history.count > 200 { history.removeFirst() }
-            if !errors.isEmpty { try emit(result) }
+            if validationEnabled && !validation.isEmpty { try emit(result) }
             return result
         }
         func save(final: Bool = false) throws -> URL {
@@ -334,12 +374,14 @@ enum NativeMaterialTrainer {
             for epoch in 0..<options.updatesPerMap {
                 currentEpoch = epoch + 1
                 var order = Array(training.indices); random.shuffle(&order)
+                var epochFinished = true
                 for (position, index) in order.enumerated() {
                     try control.check()
                     // A deadline schedules no new update. A step already in
                     // progress finishes before the validated final save.
-                    if control.shouldStopAndSave || timeLimitReached() { break }
+                    if control.shouldStopAndSave || timeLimitReached() { epochFinished = false; break }
                     let sample = training[index]
+                    if quarantined.contains(sample.split + ":" + sample.id) { continue }
                     activeUpdate = true
                     try emit(["event": "update_started", "sample_id": sample.id, "sample_position": position + 1,
                         "sample_total": training.count, "operation": "Loading training maps"])
@@ -362,9 +404,9 @@ enum NativeMaterialTrainer {
                         try emit(["event": "accumulation_sample", "sample_id": accumulatedSample.id,
                             "accumulation_step": microbatch + 1, "learning_rate": rate,
                             "operation": "Accumulating map gradients"])
-                        let derivative = try autoreleasepool {
+                        let derivative: NativeMaterialModel.Program.Execution? = try autoreleasepool {
                             let loadingStarted = ProcessInfo.processInfo.systemUptime
-                            let data = try pair(accumulatedSample)
+                            guard let data = try availablePair(accumulatedSample, phase: "training") else { return nil }
                             dataPreparationSeconds += ProcessInfo.processInfo.systemUptime - loadingStarted
                             return try program.execute(rgb: data.0, adapters: model.adapterWeights, reference: data.1,
                             gradientsOnly: true,
@@ -378,13 +420,35 @@ enum NativeMaterialTrainer {
                                     "completed": done, "total": total, "accumulation_step": microbatch + 1])
                             })
                         }
-                        try accumulated.add(derivative.gradients)
-                        valueLoss += Double(derivative.valueLoss!); detailLoss += Double(derivative.gradientLoss!); totalLoss += Double(derivative.loss!)
-                        sampleEvaluations += 1
+                        if let derivative {
+                            // Validate before committing any compact sums. A bad
+                            // microbatch cannot contaminate its valid neighbours.
+                            guard let value = derivative.valueLoss, let detail = derivative.gradientLoss,
+                                  let loss = derivative.loss, value.isFinite, detail.isFinite, loss.isFinite else {
+                                try quarantine(accumulatedSample, phase: "training", error: StudioError("The training sample produced nonfinite losses."))
+                                if control.shouldStopAndSave || timeLimitReached() { break }
+                                continue
+                            }
+                            var candidate = accumulated
+                            do { try candidate.add(derivative.gradients) }
+                            catch { try quarantine(accumulatedSample, phase: "training", error: error)
+                                if control.shouldStopAndSave || timeLimitReached() { break }
+                                continue
+                            }
+                            accumulated = candidate
+                            valueLoss += Double(value); detailLoss += Double(detail); totalLoss += Double(loss)
+                            sampleEvaluations += 1
+                        }
                         try control.check()
                         if control.shouldStopAndSave || timeLimitReached() { break }
                     }
                     try control.check()
+                    guard accumulated.count > 0 else {
+                        activeUpdate = false
+                        if control.consumeCheckpoint() { _ = try save() }
+                        if control.shouldStopAndSave || timeLimitReached() { epochFinished = false; break }
+                        continue
+                    }
                     try emit(["event": "operation_progress", "phase": "training", "operation": "Applying optimizer update", "completed": 0, "total": 1])
                     let optimizerStarted = ProcessInfo.processInfo.systemUptime
                     let update = try NativeMaterialOptimizer.apply(gradients: accumulated.averaged(), weights: model.adapterWeights,
@@ -402,13 +466,25 @@ enum NativeMaterialTrainer {
                         "data_preparation_seconds": dataPreparationSeconds, "optimizer_seconds": optimizerSeconds,
                         "cumulative_engine_statistics": try JSONSerialization.jsonObject(with: JSONEncoder().encode(program.executionStatistics)),
                         "update_duration_seconds": seconds(updateStarted.duration(to: now()))])
-                    if control.shouldStopAndSave || timeLimitReached() { break }
-                    if control.consumeCheckpoint() || options.checkpointEvery > 0 && completed % options.checkpointEvery == 0 { _ = try save() }
-                    else if options.validationEvery > 0, quickCount > 0, !validation.isEmpty,
-                            completed % options.validationEvery == 0 { _ = try check(full: false, context: "periodic") }
-                    if control.shouldStopAndSave || timeLimitReached() { break }
+                    if control.shouldStopAndSave || timeLimitReached() { epochFinished = position == order.count - 1; break }
+                    if control.consumeCheckpoint() || cadenceDue(every: options.checkpointEvery, unit: options.checkpointUnit,
+                        steps: completed, epochs: completedEpochs, epochBoundary: false) { _ = try save() }
+                    else if quickCount > 0, !validation.isEmpty, cadenceDue(every: options.validationEvery, unit: options.validationUnit,
+                        steps: completed, epochs: completedEpochs, epochBoundary: false) { _ = try check(full: false, context: "periodic") }
+                    if control.shouldStopAndSave || timeLimitReached() { epochFinished = position == order.count - 1; break }
+                }
+                if epochFinished {
+                    completedEpochs += 1
+                    try emit(["event": "epoch_completed"])
+                    if !control.shouldStopAndSave && !timeLimitReached() {
+                        if cadenceDue(every: options.checkpointEvery, unit: options.checkpointUnit,
+                            steps: completed, epochs: completedEpochs, epochBoundary: true) { _ = try save() }
+                        else if quickCount > 0, !validation.isEmpty, cadenceDue(every: options.validationEvery, unit: options.validationUnit,
+                            steps: completed, epochs: completedEpochs, epochBoundary: true) { _ = try check(full: false, context: "periodic") }
+                    }
                 }
                 if control.shouldStopAndSave || timeLimitReached() { break }
+                if training.allSatisfy({ quarantined.contains($0.split + ":" + $0.id) }) { break }
             }
             try control.check()
             if let reason = stoppedReason() {
@@ -433,6 +509,7 @@ enum NativeMaterialTrainer {
                 "package_path": export.path, "completed_updates": completed, "training_performed": completed > 0,
                 "requested_updates": requestedUpdates, "updates_per_map": options.updatesPerMap,
                 "training_configuration": effectiveConfiguration, "sample_evaluations": sampleEvaluations,
+                "completed_epochs": completedEpochs, "skipped_sample_count": skippedSamples.count, "skipped_samples": skippedSamples,
                 "max_minutes": options.maxMinutes, "elapsed_training_seconds": elapsedSeconds(),
                 "time_limit_policy": "Do not start an update after the deadline. The clock starts after setup; baseline validation, an active update, and final validation and saving finish before returning.",
                 "baseline_validation": baseline, "final_validation": lastValidation, "validation_history": history,
@@ -449,12 +526,18 @@ enum NativeMaterialTrainer {
             var failure: [String: Any] = ["status": error is CancellationError ? "aborted" : "failed", "completed_updates": completed,
                 "requested_updates": requestedUpdates, "max_minutes": options.maxMinutes,
                 "training_configuration": effectiveConfiguration, "sample_evaluations": sampleEvaluations,
+                "completed_epochs": completedEpochs, "skipped_sample_count": skippedSamples.count, "skipped_samples": skippedSamples,
                 "elapsed_training_seconds": elapsedSeconds(), "error": error.localizedDescription,
                 "training_performed": completed > 0]
             if let name = options.modelName { failure["model_name"] = name }
             try? writeJSON(failure, to: options.output.appendingPathComponent("run.json"))
             throw error
         }
+    }
+    static func cadenceDue(every: Int, unit: MaterialTrainingIntervalUnit, steps: Int, epochs: Int, epochBoundary: Bool) -> Bool {
+        guard every > 0 else { return false }
+        if unit == .epoch { return epochBoundary && epochs > 0 && epochs % every == 0 }
+        return !epochBoundary && steps > 0 && steps % every == 0
     }
     // Admission bounds one checkpointed reverse stage and the largest forward
     // live set. Every recorded adapter participates; total network depth does
