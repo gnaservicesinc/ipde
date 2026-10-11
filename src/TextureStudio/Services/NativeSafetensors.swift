@@ -217,7 +217,33 @@ enum NativeMaterialCheckpoint {
         guard let configurationJSON = snapshot.metadata["configuration"], let data = configurationJSON.data(using: .utf8) else {
             throw NativeCheckpointError.invalid("recorded material configuration is missing")
         }
-        try StrictJSONKeys.validate(data, integerFields: ["step", "training_size", "rank", "weight_shape"])
+        try StrictJSONKeys.validate(data, integerFields: ["step", "training_size", "rank", "weight_shape",
+                                                       "network_width", "input_channels", "output_channels", "initialization_seed"])
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw NativeCheckpointError.invalid("material configuration must be an object")
+        }
+        if object["schema"] as? String == NativeCompactMaterialModel.schema {
+            try NativeCompactMaterialModel.validateCheckpoint(snapshot, configuration: object)
+            guard let architecture = object["architecture"] as? String, let family = object["model_family"] as? String,
+                  let target = object["target"] as? String, let step = object["step"] as? Int,
+                  let size = object["training_size"] as? Int, let inputChannels = object["input_channels"] as? Int,
+                  let outputChannels = object["output_channels"] as? Int, let width = object["network_width"] as? Int,
+                  let seed = object["initialization_seed"] as? UInt64, let initialDigest = object["initial_weights_sha256"] as? String else {
+                throw NativeCheckpointError.invalid("compact checkpoint identity or training metadata is missing")
+            }
+            let information: [String: Any] = ["checkpoint_path": url.path, "sha256": snapshot.sha256,
+                "schema": NativeCompactMaterialModel.schema, "architecture": architecture,
+                "model_family": family, "target": target, "step": step,
+                "compatible": true, "variant": "full", "supports_training_warm_start": true,
+                "supports_studio_inference": true, "refinement_policy": "native_compact_full_training",
+                "training_size": size, "input_channels": inputChannels,
+                "output_channels": outputChannels, "network_width": width,
+                "from_scratch": true, "base_required": false, "base": NSNull(),
+                "initialization_seed": seed, "initial_weights_sha256": initialDigest,
+                "model_name": object["model_name"] ?? NSNull(), "scope": "full-model", "validation": object["validation"] ?? NSNull()]
+            try Task.checkCancellation()
+            return String(decoding: try JSONSerialization.data(withJSONObject: information, options: [.sortedKeys]), as: UTF8.self)
+        }
         let configuration: Configuration
         do { configuration = try JSONDecoder().decode(Configuration.self, from: data) }
         catch { throw NativeCheckpointError.invalid("material configuration types are invalid") }
@@ -233,7 +259,6 @@ enum NativeMaterialCheckpoint {
             throw NativeCheckpointError.invalid("expected a complete recorded native material checkpoint")
         }
         if !full { try validateAdapter(configuration, snapshot: snapshot) }
-        let object = try JSONSerialization.jsonObject(with: data) as! [String: Any]
         let information: [String: Any] = ["checkpoint_path": url.path, "sha256": snapshot.sha256,
             "schema": configuration.schema, "architecture": configuration.architecture,
             "target": configuration.target, "step": configuration.step, "compatible": true,

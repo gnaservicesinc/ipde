@@ -105,6 +105,7 @@ struct NativeMaterialTransfer: Sendable {
         try Task.checkCancellation()
         try FileManager.default.moveItem(at: stage, to: directory)
         try register(["repository": repository, "revision": revision, "sha256": digest,
+            "architecture": configuration["architecture"] ?? NSNull(), "model_family": configuration["model_family"] ?? "pbrnxt",
             "target": configuration["target"] ?? NSNull(), "checkpoint_filename": name])
         return try NativeMaterialCheckpoint.inspect(at: directory.appendingPathComponent(name))
     }
@@ -138,7 +139,9 @@ struct NativeMaterialTransfer: Sendable {
               Set(modes.compactMap { $0["path"] as? String }) == Set(names) else {
             throw StudioError("The Hub upload inventory differs from the verified model package.")
         }
-        var lines: [[String: Any]] = [["key": "header", "value": ["summary": "Upload Texture Studio native material checkpoint and LoRA"]]]
+        let summary = configuration["schema"] as? String == NativeCompactMaterialModel.schema
+            ? "Upload Texture Studio standalone compact material model" : "Upload Texture Studio native material checkpoint and LoRA"
+        var lines: [[String: Any]] = [["key": "header", "value": ["summary": summary]]]
         for name in names {
             try Task.checkCancellation()
             let file = package.appendingPathComponent(name), mode = modes.first { $0["path"] as? String == name }?["uploadMode"] as? String
@@ -168,6 +171,7 @@ struct NativeMaterialTransfer: Sendable {
         let name = configuration["checkpoint_filename"] as? String ?? "adapter.safetensors"
         let digest = hashes[name] as? String ?? ""
         try register(["repository": repository, "revision": revision, "target": configuration["target"] ?? NSNull(),
+            "architecture": configuration["architecture"] ?? NSNull(), "model_family": configuration["model_family"] ?? "pbrnxt",
             "checkpoint_filename": name, "sha256": digest])
         return try Self.json(["repository": repository, "revision": revision, "url": "https://huggingface.co/\(repository)",
             "commit_url": commit["commitUrl"] ?? "https://huggingface.co/\(repository)/commit/\(revision)",

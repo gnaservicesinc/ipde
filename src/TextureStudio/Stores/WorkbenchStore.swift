@@ -114,6 +114,10 @@ final class WorkbenchStore {
         dataset?.materials.first { $0.samples.contains { $0.id == selectedSampleId } }.map { $0.name ?? $0.materialId.replacingOccurrences(of: "_", with: " ") }
     }
     var selectedCheckpoint: WorkbenchCheckpoint? { checkpoints.first { $0.id == selectedCheckpointId } }
+    var comparisonBaselineLabel: String {
+        checkpoints.first { comparisonCheckpointIds.contains($0.id) }?.modelFamily?.isCompact == true ?
+            "Include untrained compact initialization" : "Include the material base before refinement"
+    }
     var selectedDiffuseMap: WorkbenchMap? {
         selectedSample?.inputVariants?.first { $0.variantId == selectedInputVariantId } ?? selectedSample?.inputVariants?.first ?? selectedSample?.maps["input"]
     }
@@ -156,7 +160,8 @@ final class WorkbenchStore {
     var workspaceURL: URL { URL(fileURLWithPath: workspacePath).standardizedFileURL }
     var dependencyArguments: [String] { ["--model-directory", modelDirectory] }
     func dependencyArguments(for checkpoint: WorkbenchCheckpoint) -> [String] {
-        ["--model-directory", baseDirectory(for: checkpoint)]
+        if checkpoint.modelFamily?.isCompact == true { return [] }
+        return ["--model-directory", baseDirectory(for: checkpoint)]
     }
 
     init(preferences defaults: UserDefaults = UserDefaults(suiteName: "org.ipde.material-tools")!,
@@ -384,6 +389,27 @@ final class WorkbenchStore {
     func selectTrainingTarget(_ target: String) {
         guard !isBusy, ["height", "roughness", "normal"].contains(target) else { return }
         training.target = target
+        if training.modelFamily.isCompact {
+            training.modelFamily = target == "normal" ? .compactNormal : .compactScalar
+        }
+        clearIncompatibleTrainingCheckpoint()
+    }
+
+    func selectTrainingModelFamily(_ family: MaterialTrainingModelFamily) {
+        guard !isBusy, family != training.modelFamily else { return }
+        let previous = training.modelFamily
+        training.modelFamily = family
+        if previous.isCompact != family.isCompact { training.learningRate = family.defaultLearningRate }
+        if !family.supports(target: training.target) { training.target = family == .compactNormal ? "normal" : "height" }
+        if !family.isCompact, !["final-map", "map-decoder"].contains(training.scope) { training.scope = "final-map" }
+        clearIncompatibleTrainingCheckpoint()
+    }
+
+    private func clearIncompatibleTrainingCheckpoint() {
+        if let checkpoint = selectedCheckpoint, !checkpoint.matchesTraining(training) {
+            selectedCheckpointId = nil
+            training.useWarmStart = false
+        } else if selectedCheckpoint == nil { training.useWarmStart = false }
     }
 
     func prepareTrainingDataset() {
@@ -535,18 +561,19 @@ final class WorkbenchStore {
                     displayTransform: referenceTransform))
             }
             if includeBase, let reference = selected.first {
-                self.activity = "Running the material base model"
+                let compact = reference.modelFamily?.isCompact == true
+                self.activity = compact ? "Running untrained compact initialization" : "Running the material base model"
                 let result: MaterialInferenceResponse = try WorkbenchResult.decode(MaterialInferenceResponse.self, output: await self.worker([
                     "infer", "--baseline", "--checkpoint", reference.checkpointPath, "--expected-sha256", reference.sha256,
                     "--image", modelImage.path, "--output", parent.appendingPathComponent("base-untrained").path] + self.dependencyArguments(for: reference)))
                 guard result.checkpointSha256 == reference.sha256, let map = result.outputs[target] else {
                     throw StudioError("The base comparison did not match the selected checkpoint architecture and map type.")
                 }
-                candidates.append(MapReviewCandidate(id: "base|" + reference.id, label: "Base · \(targetLabel)",
+                candidates.append(MapReviewCandidate(id: "base|" + reference.id, label: "\(compact ? "Untrained initialization" : "Base") · \(targetLabel)",
                     mapURL: URL(fileURLWithPath: map.path), numeric: true, sampleLabel: sampleLabel,
-                    detail: "Material base prediction before refinement", role: "base",
+                    detail: compact ? "Compact model prediction from its recorded random initialization before training" : "Material base prediction before refinement", role: "base",
                     modelIdentity: MapReviewModelIdentity(architecture: reference.trainingBaseLabel,
-                        mapType: target, modelName: "Material base")))
+                        mapType: target, modelName: compact ? "Untrained compact initialization" : "Material base")))
             }
             for (i, checkpoint) in selected.enumerated() {
                 self.activity = "Running checkpoint \(i + 1)/\(selected.count): \(checkpoint.title)"
@@ -598,7 +625,7 @@ final class WorkbenchStore {
 
     func loadTrainingCapabilities() async throws {
         let result = try WorkbenchResult.decode(WorkbenchTrainingCapabilities.self,
-            output: await worker(["capabilities", "--scope", training.scope]))
+            output: await worker(["capabilities", "--scope", training.effectiveScope, "--model-family", training.modelFamily.rawValue]))
         backendTrainingSizes = result.trainingSizes.filter { [256, 512, 1024, 2048].contains($0) }.sorted()
         supportedTrainingSizes = backendTrainingSizes.filter { dataset?.supportedTrainingSizes?.contains($0) ?? true }
         if dataset?.trainingSize == nil, !supportedTrainingSizes.contains(training.size), let size = supportedTrainingSizes.last {
@@ -645,6 +672,8 @@ final class WorkbenchStore {
         }
         if training.useWarmStart {
             guard let checkpoint = selectedCheckpoint, checkpoint.supportsTrainingWarmStart else { return "Select a material checkpoint to refine." }
+            if checkpoint.modelFamily != training.modelFamily { return "Choose a starting checkpoint from the selected model family." }
+            if training.modelFamily.isCompact, checkpoint.target != training.target { return "Use the compact checkpoint's recorded \(checkpoint.target) target when continuing training." }
             if checkpoint.schema == "texture-studio-material-lora-v1", checkpoint.target != training.target || (checkpoint.scope ?? "final-map") != training.scope {
                 return "Use the selected LoRA's \(checkpoint.target) target and \(checkpoint.scope ?? "final-map") scope when refining it."
             }
@@ -666,22 +695,21 @@ final class WorkbenchStore {
         let options = training
         let modelName = effectiveTrainingModelName
         let selectedMaterial = selectedMaterialId
-        let dependencies = checkpoint.map { dependencyArguments(for: $0) } ?? dependencyArguments
+        let dependencies = options.modelFamily.isCompact ? [] : checkpoint.map { dependencyArguments(for: $0) } ?? dependencyArguments
         let developer = developerMode
         let publishAfterTraining = developer && uploadAfterTraining
-        operation(checkpoint == nil ? "Training material LoRA…" : "Refining material LoRA…", training: true) {
+        operation(options.modelFamily.isCompact ? "Training compact material model…" : checkpoint == nil ? "Training material LoRA…" : "Refining material LoRA…", training: true) {
             let prepared = try await self.ensureTrainingDataset(options: options, selectedMaterial: selectedMaterial)
             let output = try self.newOutputURL(prefix: "material-\(options.target)")
             self.lastOutputURL = output
             var args = [checkpoint == nil ? "train" : "refine", "--dataset", prepared.datasetPath,
                 "--output", output.path, "--size", String(options.size), "--whole-maps",
                 "--model-name", modelName,
-                "--target", options.target, "--scope", options.scope,
+                "--target", options.target, "--scope", options.effectiveScope, "--model-family", options.modelFamily.rawValue,
                 "--max-minutes", String(options.maxMinutes),
                 "--updates-per-map", String(options.updatesPerCrop),
                 "--validation-every", String(options.validationEvery), "--checkpoint-every", String(options.checkpointEvery),
                 "--validation-unit", options.validationUnit.rawValue, "--checkpoint-unit", options.checkpointUnit.rawValue,
-                "--lora-rank", String(options.loraRank), "--lora-alpha", String(options.loraAlpha),
                 "--learning-rate", String(options.learningRate),
                 "--gradient-accumulation-steps", String(options.gradientAccumulationSteps),
                 "--optimizer", options.optimizer,
@@ -691,6 +719,7 @@ final class WorkbenchStore {
                 "--learning-rate-schedule", options.learningRateSchedule,
                 "--minimum-learning-rate-ratio", String(options.minimumLearningRateRatio),
                 "--warmup-updates", String(options.warmupUpdates), "--seed", String(options.seed)] + dependencies
+            if !options.modelFamily.isCompact { args += ["--lora-rank", String(options.loraRank), "--lora-alpha", String(options.loraAlpha)] }
             if developer { args += ["--developer-mode"] }
             if options.useSelectedMaterialOnly, let id = selectedMaterial { args += ["--material", id] }
             if let checkpoint { args += ["--checkpoint", checkpoint.checkpointPath, "--expected-sha256", checkpoint.sha256] }
@@ -712,7 +741,7 @@ final class WorkbenchStore {
                         "No valid training samples remain. Saved the current weights without training." :
                         "No valid training samples remain. Saved \((result.completedUpdates ?? 0).formatted()) completed steps."
                 } else if self.isSavingTraining || result.status == "stopped" {
-                    self.activity = "Stopped and saved material LoRA."
+                    self.activity = options.modelFamily.isCompact ? "Stopped and saved compact material model." : "Stopped and saved material LoRA."
                 } else {
                     self.activity = "Training finished. Review the material maps before using this model."
                 }
@@ -771,6 +800,10 @@ final class WorkbenchStore {
                   checkpoint.supportsTrainingWarmStart else {
                 throw StudioError("The requested checkpoint changed or cannot be refined. Choose the model again.")
             }
+            guard checkpoint.modelFamily == handoff.training.modelFamily,
+                  !handoff.training.modelFamily.isCompact || checkpoint.target == handoff.training.target else {
+                throw StudioError("The requested training family or target does not match this compact checkpoint.")
+            }
             self.training = handoff.training
             if let dataset = handoff.datasetURL { try await self.loadDataset(dataset) }
             self.training = handoff.training
@@ -818,7 +851,7 @@ final class WorkbenchStore {
         }
         isStopping = true
         isSavingTraining = true
-        activity = "Finishing the current update and saving the material LoRA…"
+        activity = training.modelFamily.isCompact ? "Finishing the current step and saving the compact material model…" : "Finishing the current update and saving the material LoRA…"
         runner?.stopAndSave()
     }
 
@@ -857,7 +890,7 @@ final class WorkbenchStore {
             switch kind {
             case "training_started":
                 hasTrainingStarted = true
-                if !isStopping { activity = "Training material LoRA…" }
+                if !isStopping { activity = training.modelFamily.isCompact ? "Training compact material model…" : "Training material LoRA…" }
             case "training_stopped":
                 guard let reason = event["stopped_reason"] as? String,
                       ["time_limit", "no_valid_training_samples"].contains(reason), !isStopping else { continue }
@@ -916,9 +949,7 @@ final class WorkbenchStore {
         chooseFolder(title: "Choose a folder for a new model package") { parent in
             self.operation("Exporting selected model package…") {
                 let destination = parent.appendingPathComponent("material-\(checkpoint.target)-\(UUID().uuidString.prefix(8))")
-                var args = ["package", "--checkpoint", checkpoint.checkpointPath, "--expected-sha256", checkpoint.sha256, "--output", destination.path] + self.dependencyArguments(for: checkpoint)
-                if self.developerMode { args += ["--developer-mode"] }
-                for adapter in self.adapterMix { args += ["--adapter", "\(adapter.path)=\(adapter.weight)"] }
+                let args = self.checkpointPackageArguments(for: checkpoint, output: destination, developer: self.developerMode)
                 _ = try await self.worker(args)
                 self.lastPackageURL = destination
                 self.lastPackageCheckpointId = checkpoint.id

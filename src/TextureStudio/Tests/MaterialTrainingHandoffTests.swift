@@ -3,6 +3,47 @@ import XCTest
 @testable import TextureStudio
 
 final class MaterialTrainingHandoffTests: XCTestCase {
+    func testCompactHandoffRoundTripBindsScalarAndNormalTargetsAndIgnoresUnusedLoRASettings() throws {
+        for target in ["height", "roughness", "normal"] {
+            let family: MaterialTrainingModelFamily = target == "normal" ? .compactNormal : .compactScalar
+            let checkpoint = try WorkbenchResult.decode(WorkbenchCheckpoint.self, output: """
+            {"checkpoint_path":"/models/compact/model.safetensors","sha256":"\(String(repeating: "b", count: 64))",
+             "schema":"texture-studio-compact-material-v1","target":"\(target)","scope":"full-model",
+             "architecture":"\(family.architecture!)","variant":"full",
+             "step":42,"compatible":true,"supports_training_warm_start":true}
+            """)
+            var training = options()
+            training.modelFamily = family
+            training.target = target
+            training.scope = "full-model"
+            training.learningRate = 0.0007
+            training.loraRank = 0
+            training.loraAlpha = 0
+            let handoff = try MaterialTrainingHandoff(checkpoint: checkpoint, dataset: nil, training: training,
+                                                      sampleID: nil, inputVariantID: nil)
+            let document = try handoff.writeTemporary()
+            defer { _ = try? handoff.discardTemporaryFile(at: document) }
+            XCTAssertEqual(try MaterialTrainingHandoff.read(from: document).training, training)
+            var mismatched = training
+            mismatched.modelFamily = .pbrnxt
+            XCTAssertThrowsError(try MaterialTrainingHandoff(checkpoint: checkpoint, dataset: nil, training: mismatched,
+                                                            sampleID: nil, inputVariantID: nil))
+            mismatched = training
+            mismatched.target = target == "height" ? "roughness" : "height"
+            XCTAssertThrowsError(try MaterialTrainingHandoff(checkpoint: checkpoint, dataset: nil, training: mismatched,
+                                                            sampleID: nil, inputVariantID: nil))
+            var payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: document)) as? [String: Any])
+            for (key, invalid) in [("learningRate", 0.0), ("optimizerBeta1", 1.0), ("optimizerEpsilon", 1e-100)] {
+                var changed = try XCTUnwrap(payload["training"] as? [String: Any])
+                changed[key] = invalid
+                payload["training"] = changed
+                try JSONSerialization.data(withJSONObject: payload).write(to: document)
+                XCTAssertThrowsError(try MaterialTrainingHandoff.read(from: document), key)
+                payload["training"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(training))
+            }
+        }
+    }
+
     func testRoundTripCapturesExactCheckpointDatasetSelectionAndTrainingSettings() throws {
         let handoff = try fixture()
         let document = try handoff.writeTemporary()

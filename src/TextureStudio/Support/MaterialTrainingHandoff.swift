@@ -20,6 +20,10 @@ struct MaterialTrainingHandoff: Codable, Sendable {
         guard checkpoint.supportsTrainingWarmStart else {
             throw StudioError("The selected checkpoint does not support material refinement.")
         }
+        guard checkpoint.modelFamily == training.modelFamily,
+              !training.modelFamily.isCompact || checkpoint.target == training.target else {
+            throw StudioError("The starting checkpoint must match the compact training family and target.")
+        }
         schema = Self.schemaName
         requestID = UUID()
         checkpointURL = checkpoint.url.standardizedFileURL
@@ -89,13 +93,14 @@ struct MaterialTrainingHandoff: Codable, Sendable {
         guard checkpointSHA256.count == 64, checkpointSHA256.allSatisfy(\.isHexDigit) else {
             throw StudioError("The Trainer handoff needs the selected checkpoint's exact SHA256.")
         }
+        if let issue = training.configurationIssue { throw StudioError(issue) }
         guard ["height", "roughness", "normal"].contains(training.target),
-              ["final-map", "map-decoder"].contains(training.scope),
+              training.modelFamily.isCompact || ["final-map", "map-decoder"].contains(training.scope),
+              training.modelFamily.supports(target: training.target),
               [256, 512, 1024, 2048].contains(training.size), training.useWarmStart,
               training.updatesPerCrop > 0,
               training.maxMinutes.isFinite, training.maxMinutes > 0,
-              training.loraRank > 0,
-              training.loraAlpha.isFinite, training.loraAlpha > 0,
+              training.modelFamily.isCompact || training.loraRank > 0 && training.loraAlpha.isFinite && training.loraAlpha > 0,
               training.validationEvery >= 0,
               training.checkpointEvery >= 0,
               sampleID?.isEmpty != true, inputVariantID?.isEmpty != true else {

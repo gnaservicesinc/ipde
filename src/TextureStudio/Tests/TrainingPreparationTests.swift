@@ -6,6 +6,36 @@ import XCTest
 
 @MainActor
 final class TrainingPreparationTests: XCTestCase {
+    func testCompactFamiliesDispatchFullTrainingWithoutPBRDependencyOrLoRASettings() async throws {
+        for family in [MaterialTrainingModelFamily.compactScalar, .compactNormal] {
+            let fixture = try Fixture()
+            defer { fixture.remove() }
+            fixture.mapTarget = family == .compactNormal ? "normal" : "height"
+            let store = fixture.store()
+            store.uploadAfterTraining = false
+            store.modelDirectory = fixture.root.appendingPathComponent("missing-pbr-base").path
+            store.selectTrainingModelFamily(family)
+            try await store.loadTrainingCapabilities()
+            try await store.loadDataset(fixture.original)
+            store.training.size = 1024
+            XCTAssertNil(store.trainingConfigurationIssue)
+            store.startTraining()
+            try await settled(store)
+            XCTAssertNil(store.error)
+            let train = try XCTUnwrap(fixture.calls.first { $0.first == "train" })
+            XCTAssertEqual(value("--model-family", in: train), family.rawValue)
+            XCTAssertEqual(value("--scope", in: train), "full-model")
+            XCTAssertEqual(value("--target", in: train), fixture.mapTarget)
+            XCTAssertEqual(value("--learning-rate", in: train), "0.001")
+            XCTAssertNil(value("--model-directory", in: train))
+            XCTAssertNil(value("--lora-rank", in: train))
+            XCTAssertNil(value("--lora-alpha", in: train))
+            XCTAssertFalse(fixture.calls.contains { $0.first?.contains("download") == true })
+            XCTAssertEqual(store.selectedCheckpoint?.modelFamily, family)
+            XCTAssertTrue(store.selectedCheckpoint?.supportsStudioInference == true)
+        }
+    }
+
     func testPreparationUsesSupportedNativeCropGrid() async throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
@@ -115,6 +145,7 @@ final class TrainingPreparationTests: XCTestCase {
         XCTAssertEqual(value("--size", in: train), "1024")
         XCTAssertEqual(value("--dataset", in: train), fixture.prepared.path)
         XCTAssertEqual(value("--model-name", in: train), "石 Stone / Displacement")
+        XCTAssertEqual(value("--model-family", in: train), "pbrnxt")
         XCTAssertEqual(value("--learning-rate", in: train), String(store.training.learningRate))
         XCTAssertEqual(value("--gradient-accumulation-steps", in: train), "4")
         XCTAssertEqual(value("--optimizer", in: train), "adamw")
@@ -565,6 +596,8 @@ final class TrainingPreparationTests: XCTestCase {
         let suite = "training-grid-\(UUID().uuidString)"
         var calls: [[String]] = []
         var wrongGrid = false
+        var mapTarget = "height"
+        var trainedFamily: MaterialTrainingModelFamily = .pbrnxt
         var holdTraining = false
         var holdPreparation = false
         var trainingResult: [String: Any] = [:]
@@ -585,7 +618,7 @@ final class TrainingPreparationTests: XCTestCase {
         func dataset(prepared isPrepared: Bool) throws -> String {
             let size = isPrepared ? 1024 : 2048
             let maps: [String: Any] = ["input": ["path": root.appendingPathComponent("diffuse.png").path, "width": size, "height": size],
-                "height": ["path": root.appendingPathComponent("height.png").path, "width": wrongGrid && isPrepared ? 512 : size, "height": size]]
+                mapTarget: ["path": root.appendingPathComponent("\(mapTarget).png").path, "width": wrongGrid && isPrepared ? 512 : size, "height": size]]
             var value: [String: Any] = ["dataset_path": isPrepared ? prepared.path : original.path,
                 "index_sha256": isPrepared ? "prepared-sha" : "source-sha", "supported_training_sizes": [512, 1024, 2048],
                 "automatic_validation": ["policy": "subject-extra-crops-v2", "material_ids": ["soil"]],
@@ -608,13 +641,19 @@ final class TrainingPreparationTests: XCTestCase {
                     return try self.dataset(prepared: true)
                 case "train":
                     if self.holdTraining { await withCheckedContinuation { self.continuation = $0 } }
+                    if let index = args.firstIndex(of: "--model-family"), args.indices.contains(index + 1),
+                       let family = MaterialTrainingModelFamily(rawValue: args[index + 1]) { self.trainedFamily = family }
                     var result = self.trainingResult
                     result["checkpoint_path"] = self.root.appendingPathComponent("adapter.safetensors").path
                     result["package_path"] = self.root.path
                     return try self.json(result)
-                case "checkpoint": return try self.json(["checkpoint_path": self.root.appendingPathComponent("adapter.safetensors").path,
-                    "sha256": "exact", "schema": "texture-studio-material-lora-v1", "target": "height", "step": 3,
-                    "compatible": true, "variant": "lora", "supports_training_warm_start": true])
+                case "checkpoint":
+                    var checkpoint: [String: Any] = ["checkpoint_path": self.root.appendingPathComponent("adapter.safetensors").path,
+                        "sha256": "exact", "schema": self.trainedFamily.isCompact ? "texture-studio-compact-material-v1" : "texture-studio-material-lora-v1",
+                        "target": self.mapTarget, "step": 3, "compatible": true,
+                        "variant": self.trainedFamily.isCompact ? "full" : "lora", "supports_training_warm_start": true]
+                    if let architecture = self.trainedFamily.architecture { checkpoint["architecture"] = architecture }
+                    return try self.json(checkpoint)
                 case "cleanup-size": return try self.json(["dataset_path": self.prepared.path, "source_dataset_path": self.original.path, "removed": true])
                 case "remove-missing": return "{\"removed\":true}"
                 default: throw StudioError("Unexpected worker command")

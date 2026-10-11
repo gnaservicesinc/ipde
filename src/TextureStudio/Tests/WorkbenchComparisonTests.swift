@@ -4,6 +4,56 @@ import XCTest
 
 @MainActor
 final class WorkbenchComparisonTests: XCTestCase {
+    func testCompactComparisonRunsRecordedUntrainedInitializationWithoutPBRDependency() async throws {
+        for target in ["height", "roughness", "normal"] {
+            let root = try temporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let suite = "compact-comparison-\(UUID().uuidString)"
+            let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            var calls: [[String]] = []
+            let store = WorkbenchStore(preferences: defaults, managedWorkspaceURL: root, workerOverride: { arguments, _ in
+                calls.append(arguments)
+                let output = arguments[try XCTUnwrap(arguments.firstIndex(of: "--output")) + 1]
+                return "{\"outputs\":{\"\(target)\":{\"path\":\"\(output)/\(target).exr\"}},\"checkpoint_sha256\":\"exact-compact-sha\"}"
+            })
+            store.modelDirectory = root.appendingPathComponent("missing-pbr-base").path
+            store.dataset = try WorkbenchResult.decode(WorkbenchDataset.self, output: """
+            {"dataset_path":"/dataset","index_sha256":"dataset-sha","materials":[{"material_id":"soil","samples":[
+              {"sample_id":"soil_crop","status":"approved","split":"train","width":1024,"height":1024,
+               "maps":{"input":{"path":"/dataset/soil/photo.png"},"\(target)":{"path":"/dataset/soil/\(target).png"}}}]}]}
+            """)
+            store.selectedSampleId = "soil_crop"
+            let family: MaterialTrainingModelFamily = target == "normal" ? .compactNormal : .compactScalar
+            let checkpoint = try WorkbenchResult.decode(WorkbenchCheckpoint.self, output: """
+            {"checkpoint_path":"/models/compact/model.safetensors","sha256":"exact-compact-sha",
+             "schema":"texture-studio-compact-material-v1","architecture":"\(family.architecture!)",
+             "target":"\(target)","step":42,"compatible":true,"variant":"full","supports_training_warm_start":true}
+            """)
+            store.checkpoints = [checkpoint]
+            store.comparisonCheckpointIds = [checkpoint.id]
+            XCTAssertEqual(store.comparisonBaselineLabel, "Include untrained compact initialization")
+            XCTAssertNil(store.comparisonConfigurationIssue)
+            store.compare()
+            try await waitForOperation(store)
+            XCTAssertNil(store.error)
+            XCTAssertEqual(calls.count, 2)
+            XCTAssertTrue(calls[0].contains("--baseline"))
+            XCTAssertFalse(calls[1].contains("--baseline"))
+            for call in calls {
+                XCTAssertFalse(call.contains("--model-directory"))
+                XCTAssertTrue(call.contains("exact-compact-sha"))
+                XCTAssertTrue(call.contains(checkpoint.checkpointPath))
+            }
+            let baseline = try XCTUnwrap(store.comparisonCandidates.first { $0.role == "base" })
+            XCTAssertTrue(baseline.label.contains("Untrained initialization"))
+            XCTAssertTrue(baseline.detail?.contains("recorded random initialization") == true)
+            XCTAssertEqual(baseline.modelIdentity?.architecture, family.architecture)
+            XCTAssertEqual(baseline.modelIdentity?.mapType, target)
+            XCTAssertNil(baseline.modelIdentity?.checkpointStep)
+        }
+    }
+
     func testComparisonReconstructsTrainingGridAndRetainsOnlyOriginalReferences() async throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

@@ -46,7 +46,8 @@ struct TrainingWorkbenchView: View {
                         Text(store.datasetPreparationSummary).font(.caption).foregroundStyle(.secondary)
                     }
                 }.disabled(store.isBusy)
-                Section("Refine a material model") {
+                Section(store.training.modelFamily.isCompact ? "Train a compact material model" : "Refine a material model") {
+                    TrainingModelFamilyField(store: store)
                     TrainingModelNameField(name: $store.training.modelName, suggestedName: store.suggestedTrainingModelName)
                     Text("Shown in Saved Models and exported with the checkpoint. Clear the field to use the suggested name.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -56,7 +57,7 @@ struct TrainingWorkbenchView: View {
                         Text("Normals").tag("normal")
                     }
                     Toggle("Start from selected checkpoint", isOn: $store.training.useWarmStart)
-                    Text("Training scope: \(store.training.scope == "map-decoder" ? "Map decoder and output branch" : "Map output branch")")
+                    Text(store.training.modelFamily.isCompact ? "Training scope: complete compact model" : "Training scope: \(store.training.scope == "map-decoder" ? "Map decoder and output branch" : "Map output branch")")
                         .font(.caption).foregroundStyle(.secondary)
                     Button("Choose Starting Checkpoint…") { store.chooseResumeCheckpoint() }
                     if store.training.useWarmStart {
@@ -70,7 +71,7 @@ struct TrainingWorkbenchView: View {
                     }
                     NumericField("Updates per map", value: $store.training.updatesPerCrop, atLeast: 1, unit: "updates")
                     NumericField("Time limit", value: $store.training.maxMinutes, greaterThan: 0, unit: "minutes")
-                    Text(developerMode ? "Exports a full fused safetensors checkpoint and a separate LoRA. Upload to Hugging Face from Saved Models." : "Exports a separate safetensors LoRA for refining your material base.")
+                    Text(store.training.modelFamily.isCompact ? "Exports a complete safetensors model. No PBRnxt base weights are required." : developerMode ? "Exports a full fused safetensors checkpoint and a separate LoRA. Upload to Hugging Face from Saved Models." : "Exports a separate safetensors LoRA for refining your material base.")
                         .font(.caption).foregroundStyle(.secondary)
                     if let issue = store.trainingConfigurationIssue {
                         Text(issue).font(.caption).foregroundStyle(.secondary)
@@ -104,15 +105,17 @@ struct TrainingWorkbenchView: View {
                         Text("0 disables gradient clipping. Warm starts restore weights and start fresh optimizer moments.")
                             .font(.caption).foregroundStyle(.secondary)
                         NumericField("Random seed", value: $store.training.seed, atLeast: 0)
-                        NumericField("LoRA rank", value: $store.training.loraRank, atLeast: 1)
-                            .disabled(store.training.useWarmStart && store.selectedCheckpoint?.schema == "texture-studio-material-lora-v1")
-                        NumericField("LoRA alpha", value: $store.training.loraAlpha, greaterThan: 0)
-                            .disabled(store.training.useWarmStart && store.selectedCheckpoint?.schema == "texture-studio-material-lora-v1")
-                        if store.training.useWarmStart && store.selectedCheckpoint?.schema == "texture-studio-material-lora-v1" {
-                            Text("The starting LoRA retains its recorded rank and alpha. These controls apply to new adapters.")
-                                .font(.caption).foregroundStyle(.secondary)
+                        if !store.training.modelFamily.isCompact {
+                            NumericField("LoRA rank", value: $store.training.loraRank, atLeast: 1)
+                                .disabled(store.training.useWarmStart && store.selectedCheckpoint?.schema == "texture-studio-material-lora-v1")
+                            NumericField("LoRA alpha", value: $store.training.loraAlpha, greaterThan: 0)
+                                .disabled(store.training.useWarmStart && store.selectedCheckpoint?.schema == "texture-studio-material-lora-v1")
+                            if store.training.useWarmStart && store.selectedCheckpoint?.schema == "texture-studio-material-lora-v1" {
+                                Text("The starting LoRA retains its recorded rank and alpha. These controls apply to new adapters.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                         }
-                        Text("Float32 training. The fixed objective is value L1 + 4 × multiscale detail L1; the selected LoRA layers learn while base weights stay frozen.")
+                        Text(store.training.modelFamily.isCompact ? "Float32 training of all compact model weights. The fixed objective is value L1 + 4 × multiscale detail L1." : "Float32 training. The fixed objective is value L1 + 4 × multiscale detail L1; the selected LoRA layers learn while base weights stay frozen.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }.disabled(store.isBusy)
@@ -132,12 +135,14 @@ struct TrainingWorkbenchView: View {
                 }.disabled(store.isBusy)
                 if developerMode {
                     Section("Developer controls") {
-                        Picker("Refinement scope", selection: $store.training.scope) {
-                            Text("Map output branch").tag("final-map")
-                            Text("Map decoder").tag("map-decoder")
+                        if !store.training.modelFamily.isCompact {
+                            Picker("Refinement scope", selection: $store.training.scope) {
+                                Text("Map output branch").tag("final-map")
+                                Text("Map decoder").tag("map-decoder")
+                            }
+                            Text("The output branch refines the selected map's RRDB layers. The map decoder also adapts its decoder and tail, adding backward work and time per step.")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
-                        Text("The output branch refines the selected map's RRDB layers. The map decoder also adapts its decoder and tail, adding backward work and time per step.")
-                            .font(.caption).foregroundStyle(.secondary)
                         Toggle("Upload full checkpoint after training", isOn: $store.uploadAfterTraining)
                         Toggle("Public Hugging Face model", isOn: $store.uploadPublic)
                         TextField("Hugging Face repository (automatic when blank)", text: $store.uploadRepo)
@@ -189,6 +194,26 @@ struct TrainingWorkbenchView: View {
           .accessibilityIdentifier("training.actions")
         }
         .sheet(isPresented: $showCheckpoints) { CheckpointLibraryView(store: store).frame(minWidth: 780, minHeight: 560) }
+    }
+}
+
+struct TrainingModelFamilyField: View {
+    @Bindable var store: WorkbenchStore
+
+    var body: some View {
+        Picker("Model family", selection: Binding(get: { store.training.modelFamily }, set: { store.selectTrainingModelFamily($0) })) {
+            ForEach(MaterialTrainingModelFamily.allCases, id: \.self) { family in
+                Text(family.label).tag(family)
+            }
+        }
+        .accessibilityIdentifier("training.model-family")
+        if store.training.modelFamily == .compactScalar {
+            Text("RGB diffuse input has 3 channels. The model predicts one displacement or roughness value per pixel. New compact models start from scratch; review their learned quality before use.")
+                .font(.caption).foregroundStyle(.secondary)
+        } else if store.training.modelFamily == .compactNormal {
+            Text("RGB diffuse input has 3 channels. The model predicts a normal vector with 3 components per pixel. New compact models start from scratch; review their learned quality before use.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
     }
 }
 

@@ -122,7 +122,8 @@ struct CheckpointLibraryView: View {
             Section("Selected model") {
                 Text(checkpoint.title).font(.headline).textSelection(.enabled)
                 LabeledContent("Target", value: targetTitle(checkpoint.target))
-                LabeledContent("Training base", value: checkpoint.trainingBaseLabel)
+                LabeledContent(checkpoint.modelFamily?.isCompact == true ? "Model family" : "Training base",
+                               value: checkpoint.modelFamily?.isCompact == true ? checkpoint.modelFamily?.label ?? checkpoint.trainingBaseLabel : checkpoint.trainingBaseLabel)
                 LabeledContent("Availability", value: checkpoint.availabilityLabel)
                 LabeledContent("Saved step", value: checkpoint.step.formatted())
                 LabeledContent("Interface", value: checkpoint.compatible ? "Compatible" : "Unsupported")
@@ -140,7 +141,7 @@ struct CheckpointLibraryView: View {
                     .help("Open training with this checkpoint's map and refinement scope already selected.")
             }
             Section("Model package") {
-                Text(developerMode ? "Full fused safetensors checkpoint + separate LoRA" : "Separate safetensors LoRA")
+                Text(checkpoint.modelFamily?.isCompact == true ? "Complete compact safetensors model" : developerMode ? "Full fused safetensors checkpoint + separate LoRA" : "Separate safetensors LoRA")
                     .font(.caption).foregroundStyle(.secondary)
                 Button("Export Package…") { store.exportSelectedCheckpoint() }
                     .disabled(store.isBusy)
@@ -189,7 +190,7 @@ struct CheckpointLibraryView: View {
                     Link("Open Last Uploaded Model", destination: uploaded)
                 }
             }
-            if developerMode {
+            if developerMode, checkpoint.modelFamily == .pbrnxt {
                 Section("Mix compatible LoRAs") {
                     Button("Add LoRA…") { store.chooseMixAdapter() }.disabled(store.isBusy)
                     ForEach($store.adapterMix) { $adapter in

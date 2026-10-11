@@ -24,10 +24,24 @@ extension WorkbenchStore {
     }
 
     func configureCheckpointForRefinement(_ checkpoint: WorkbenchCheckpoint) {
+        if let family = checkpoint.modelFamily, family != training.modelFamily {
+            if family.isCompact != training.modelFamily.isCompact { training.learningRate = family.defaultLearningRate }
+            training.modelFamily = family
+        }
         selectedCheckpointId = checkpoint.id
         training.target = checkpoint.target
-        training.scope = checkpoint.scope ?? "final-map"
+        training.scope = checkpoint.modelFamily?.isCompact == true ? "full-model" : checkpoint.scope ?? "final-map"
         training.useWarmStart = true
+    }
+
+    func checkpointPackageArguments(for checkpoint: WorkbenchCheckpoint, output: URL, developer: Bool) -> [String] {
+        var arguments = ["package", "--checkpoint", checkpoint.checkpointPath, "--expected-sha256", checkpoint.sha256,
+                         "--output", output.path] + dependencyArguments(for: checkpoint)
+        if developer { arguments += ["--developer-mode"] }
+        if checkpoint.modelFamily == .pbrnxt {
+            for adapter in adapterMix { arguments += ["--adapter", "\(adapter.path)=\(adapter.weight)"] }
+        }
+        return arguments
     }
 
     var comparisonConfigurationIssue: String? {

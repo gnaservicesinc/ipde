@@ -4,6 +4,52 @@ import XCTest
 
 @MainActor
 final class WorkbenchPreferencesTests: XCTestCase {
+    func testCompactFamilySelectionPersistsAndPreservesTypedSettingsAfterTransition() throws {
+        let fixture = try PreferencesFixture()
+        defer { fixture.remove() }
+        let first = WorkbenchStore(preferences: fixture.defaults, resources: fixture.resources)
+        XCTAssertEqual(first.training.modelFamily, .pbrnxt)
+        first.training.size = 512
+        first.selectTrainingModelFamily(.compactScalar)
+        XCTAssertEqual(first.training.target, "height")
+        XCTAssertEqual(first.training.size, 512)
+        XCTAssertEqual(first.training.learningRate, 0.001)
+        XCTAssertEqual(first.training.effectiveScope, "full-model")
+        first.training.learningRate = 0.0007
+        first.selectTrainingModelFamily(.compactScalar)
+        XCTAssertEqual(first.training.learningRate, 0.0007)
+        first.selectTrainingTarget("normal")
+        XCTAssertEqual(first.training.modelFamily, .compactNormal)
+        XCTAssertEqual(first.training.learningRate, 0.0007)
+        first.selectTrainingTarget("roughness")
+        XCTAssertEqual(first.training.modelFamily, .compactScalar)
+        XCTAssertEqual(first.training.learningRate, 0.0007)
+        let reopened = WorkbenchStore(preferences: fixture.defaults, resources: fixture.resources)
+        XCTAssertEqual(reopened.training, first.training)
+        reopened.selectTrainingModelFamily(.pbrnxt)
+        XCTAssertEqual(reopened.training.target, "roughness")
+        XCTAssertEqual(reopened.training.learningRate, 0.00001)
+    }
+
+    func testCompactOptionsDefaultLearningRateWithoutChangingLegacyPBRChoices() throws {
+        let decoder = JSONDecoder()
+        let old = try decoder.decode(MaterialTrainingOptions.self, from: Data("{\"target\":\"normal\",\"learningRate\":0.0002}".utf8))
+        XCTAssertEqual(old.modelFamily, .pbrnxt)
+        XCTAssertEqual(old.learningRate, 0.0002)
+        let compact = try decoder.decode(MaterialTrainingOptions.self,
+            from: Data("{\"modelFamily\":\"compact-scalar\",\"target\":\"roughness\"}".utf8))
+        XCTAssertEqual(compact.modelFamily, .compactScalar)
+        XCTAssertEqual(compact.learningRate, 0.001)
+        XCTAssertNil(compact.configurationIssue)
+        var invalid = compact
+        invalid.target = "normal"
+        XCTAssertNotNil(invalid.configurationIssue)
+        invalid.modelFamily = .compactNormal
+        invalid.loraRank = 0
+        invalid.loraAlpha = 0
+        XCTAssertNil(invalid.configurationIssue, "Full compact training does not validate hidden LoRA settings")
+    }
+
     func testPreparationWorkersDefaultToAvailableCoresAndSaveImmediately() throws {
         let fixture = try PreferencesFixture()
         defer { fixture.remove() }

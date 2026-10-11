@@ -4,6 +4,93 @@ import XCTest
 
 @MainActor
 final class WorkbenchInteractionTests: XCTestCase {
+    func testCompactRefinementAdoptsFamilyAndClearsWarmStartWhenTargetOrFamilyChanges() throws {
+        let defaults = try isolatedPreferences()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let store = WorkbenchStore(preferences: defaults)
+        let model = try WorkbenchResult.decode(WorkbenchCheckpoint.self,
+            output: compactCheckpointJSON(id: "height-model", target: "height", family: .compactScalar))
+        store.checkpoints = [model]
+        XCTAssertTrue(store.selectCheckpointForRefinement(model))
+        XCTAssertEqual(store.training.modelFamily, .compactScalar)
+        XCTAssertEqual(store.training.effectiveScope, "full-model")
+        XCTAssertEqual(store.training.learningRate, 0.001)
+        XCTAssertTrue(store.training.useWarmStart)
+        XCTAssertEqual(store.selectedCheckpointId, model.id)
+        store.training.learningRate = 0.0007
+        store.selectTrainingTarget("roughness")
+        XCTAssertEqual(store.training.modelFamily, .compactScalar)
+        XCTAssertEqual(store.training.learningRate, 0.0007)
+        XCTAssertNil(store.selectedCheckpointId, "A height checkpoint cannot warm start a roughness model")
+        XCTAssertFalse(store.training.useWarmStart)
+        XCTAssertTrue(store.selectCheckpointForRefinement(model))
+        store.selectTrainingModelFamily(.pbrnxt)
+        XCTAssertEqual(store.training.scope, "final-map")
+        XCTAssertNil(store.selectedCheckpointId)
+        XCTAssertFalse(store.training.useWarmStart)
+        var options = MaterialTrainingOptions()
+        options.modelFamily = .compactNormal
+        options.target = "normal"
+        let mismatched = try WorkbenchResult.decode(WorkbenchCheckpoint.self,
+            output: compactCheckpointJSON(id: "wrong-contract", target: "height", family: .compactNormal))
+        XCTAssertFalse(mismatched.supportsTrainingWarmStart)
+        XCTAssertFalse(mismatched.supportsStudioInference)
+        XCTAssertFalse(mismatched.matchesTraining(options))
+    }
+
+    func testCompactPackageExportIgnoresHiddenPBRAggregationAndPreservesLegacyExport() throws {
+        let defaults = try isolatedPreferences()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let store = WorkbenchStore(preferences: defaults)
+        store.modelDirectory = "/missing-pbr-base"
+        store.adapterMix = [WorkbenchAdapterWeight(path: "/models/legacy-adapter.safetensors")]
+        let model = try WorkbenchResult.decode(WorkbenchCheckpoint.self,
+            output: compactCheckpointJSON(id: "compact", target: "normal", family: .compactNormal))
+        let compact = store.checkpointPackageArguments(for: model, output: URL(fileURLWithPath: "/exports/compact"), developer: true)
+        XCTAssertEqual(compact, ["package", "--checkpoint", model.checkpointPath, "--expected-sha256", model.sha256,
+                                 "--output", "/exports/compact", "--developer-mode"])
+        let pbr = try checkpoint(id: "legacy", target: "normal", scope: "map-decoder")
+        let legacy = store.checkpointPackageArguments(for: pbr, output: URL(fileURLWithPath: "/exports/pbr"), developer: false)
+        XCTAssertTrue(legacy.contains("--model-directory"))
+        XCTAssertTrue(legacy.contains("--adapter"))
+        XCTAssertTrue(legacy.contains("/models/legacy-adapter.safetensors=1.0"))
+        XCTAssertFalse(legacy.contains("--developer-mode"))
+    }
+
+    func testCompactTrainerHandoffRestoresExactFamilyAndTypedTrainingControls() async throws {
+        let defaults = try isolatedPreferences()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let hash = String(repeating: "c", count: 64)
+        let output = compactCheckpointJSON(id: hash, target: "normal", family: .compactNormal)
+        let checkpoint = try WorkbenchResult.decode(WorkbenchCheckpoint.self, output: output)
+        let store = WorkbenchStore(preferences: defaults, workerOverride: { arguments, _ in
+            XCTAssertEqual(arguments, ["checkpoint", "--checkpoint", checkpoint.checkpointPath])
+            return output
+        })
+        var options = MaterialTrainingOptions()
+        options.modelFamily = .compactNormal
+        options.target = "normal"
+        options.scope = "full-model"
+        options.useWarmStart = true
+        options.learningRate = 0.0007
+        options.gradientAccumulationSteps = 5
+        options.seed = 123
+        options.validationEvery = 13
+        options.validationUnit = .step
+        options.checkpointEvery = 2
+        options.checkpointUnit = .epoch
+        options.loraRank = 0
+        options.loraAlpha = 0
+        let handoff = try MaterialTrainingHandoff(checkpoint: checkpoint, dataset: nil, training: options,
+                                                 sampleID: nil, inputVariantID: nil)
+        store.receiveTrainingHandoff(handoff)
+        try await waitUntilIdle(store)
+        XCTAssertNil(store.error)
+        XCTAssertEqual(store.training, options)
+        XCTAssertEqual(store.selectedCheckpointId, hash)
+        XCTAssertEqual(store.dependencyArguments(for: checkpoint), [])
+    }
+
     func testLibraryRefinementAdoptsTheExactCheckpointAndOpensTrainer() throws {
         let defaults = try isolatedPreferences()
         defer { defaults.removePersistentDomain(forName: defaultsSuite) }
@@ -173,6 +260,14 @@ final class WorkbenchInteractionTests: XCTestCase {
         """
         {"checkpoint_path":"/runs/\(id)/model.safetensors","sha256":"\(id)",
          "schema":"texture-studio-material-lora-v1","target":"\(target)","scope":"\(scope)",
+         "step":42,"compatible":true,"supports_training_warm_start":true}
+        """.replacingOccurrences(of: "\n", with: "")
+    }
+    private func compactCheckpointJSON(id: String, target: String, family: MaterialTrainingModelFamily) -> String {
+        """
+        {"checkpoint_path":"/runs/\(id)/model.safetensors","sha256":"\(id)",
+         "schema":"texture-studio-compact-material-v1","target":"\(target)","scope":"full-model",
+         "architecture":"\(family.architecture!)","variant":"full",
          "step":42,"compatible":true,"supports_training_warm_start":true}
         """.replacingOccurrences(of: "\n", with: "")
     }

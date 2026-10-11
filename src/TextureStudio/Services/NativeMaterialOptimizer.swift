@@ -1,6 +1,6 @@
 import Foundation
 
-/// Optimizes only the compact LoRA factors. Full-grid forward/backward work stays
+/// Optimizes recorded LoRA factors or complete compact model weights. Forward/backward work stays
 /// in MPSGraph; keeping this update separate allows accumulation without retaining
 /// a model graph or applying weights between microbatches.
 struct NativeMaterialOptimizerConfiguration: Sendable, Equatable {

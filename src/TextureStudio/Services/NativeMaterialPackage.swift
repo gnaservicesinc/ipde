@@ -5,9 +5,10 @@ import Foundation
 /// They do not carry executable architecture sources or an interpreter.
 enum NativeMaterialPackage {
     static let licenses = ["TextureStudio_LICENSE", "PBRnxt_LICENSE", "SCUNet_LICENSE", "SwinTransformer_LICENSE", "ESRGANplus_LICENSE"]
+    static let compactLicenses = ["TextureStudio_LICENSE", "NAFNet_LICENSE"]
     static func allowedFile(_ name: String) -> Bool {
         ["adapter.safetensors", "model.safetensors", "config.json", "README.md", "LICENSE"].contains(name)
-            || licenses.contains(where: { name == "ModelLicenses/" + $0 })
+            || (licenses + compactLicenses).contains(where: { name == "ModelLicenses/" + $0 })
     }
 
     static func verify(_ directory: URL) throws -> ([String: Any], [String: Any]) {
@@ -21,8 +22,8 @@ enum NativeMaterialPackage {
         guard manifestValues.isRegularFile == true, manifestValues.isSymbolicLink != true,
               (manifestValues.fileSize ?? Int.max) <= 1_048_576 else { throw StudioError("Invalid native package manifest.") }
         let hashes = try NativeMaterialTransfer.object(manifest)
-        let required = Set(["config.json", "README.md", "LICENSE"] + licenses.map { "ModelLicenses/" + $0 })
-        guard required.isSubset(of: Set(hashes.keys)), hashes["adapter.safetensors"] != nil,
+        let required = Set(["config.json", "README.md", "LICENSE"])
+        guard required.isSubset(of: Set(hashes.keys)),
               hashes.count <= 16 else { throw StudioError("The native model package is incomplete.") }
         for (name, value) in hashes {
             guard allowedFile(name), let digest = value as? String, NativeMaterialTransfer.isDigest(digest) else {
@@ -59,6 +60,10 @@ enum NativeMaterialPackage {
         }
         if let enumerationError { throw enumerationError }
         let config = try NativeMaterialTransfer.object(directory.appendingPathComponent("config.json"))
+        let compact = config["schema"] as? String == NativeCompactMaterialModel.schema
+        let requiredNotices = compact ? compactLicenses : licenses
+        guard Set(requiredNotices.map { "ModelLicenses/" + $0 }).isSubset(of: Set(hashes.keys)),
+              compact || hashes["adapter.safetensors"] != nil else { throw StudioError("The native model package is incomplete.") }
         guard let filename = config["checkpoint_filename"] as? String,
               ["adapter.safetensors", "model.safetensors"].contains(filename), hashes[filename] != nil else {
             throw StudioError("The model package does not identify its checkpoint.")
@@ -74,6 +79,21 @@ enum NativeMaterialPackage {
             recorded[name] = try NativeMaterialTransfer.object(Data(metadata.utf8))
         }
         let full = hashes["model.safetensors"] != nil
+        if compact {
+            guard filename == "model.safetensors", full, hashes["adapter.safetensors"] == nil,
+                  config["adapter_filename"] == nil,
+                  config["full_checkpoint"] as? Bool == true,
+                  config["optimizer_included"] as? Bool == false,
+                  config["source_images_included"] as? Bool == false else {
+                throw StudioError("A compact package must contain a complete standalone model without a LoRA adapter.")
+            }
+            var embedded = config
+            for key in ["checkpoint_filename", "full_checkpoint", "optimizer_included", "source_images_included"] { embedded.removeValue(forKey: key) }
+            guard let selected = recorded[filename], NSDictionary(dictionary: embedded).isEqual(to: selected) else {
+                throw StudioError("Package configuration differs from its recorded weights.")
+            }
+            return (config, hashes)
+        }
         guard filename == (full ? "model.safetensors" : "adapter.safetensors"),
               config["adapter_filename"] as? String == "adapter.safetensors",
               config["full_checkpoint"] as? Bool == full,
@@ -121,6 +141,22 @@ enum NativeMaterialPackage {
         return try publish(files: files, configuration: packageConfig, output: output)
     }
 
+    /// Compact training updates every weight and exports a complete standalone
+    /// model in every mode. It has no downloaded base or separately fused adapter.
+    static func export(model: NativeCompactMaterialModel, configuration: [String: Any], to output: URL, developer: Bool) throws -> String {
+        guard configuration["target"] as? String == model.target,
+              configuration["architecture"] as? String == model.architectureID,
+              configuration["network_width"] as? Int == model.networkWidth,
+              configuration["initialization_seed"] as? UInt64 == model.initializationSeed,
+              configuration["initial_weights_sha256"] as? String == model.baseSHA256 else {
+            throw StudioError("Export configuration differs from the compact model's exact architecture or initialization identity.")
+        }
+        let bytes = try NativeSafetensors.encoded(tensors: model.weights, metadata: metadata(configuration))
+        let snapshot = try NativeSafetensors(bytes: bytes)
+        try NativeCompactMaterialModel.validateCheckpoint(snapshot, configuration: configuration)
+        return try publish(files: ["model.safetensors": bytes], configuration: configuration, output: output)
+    }
+
     static func run(arguments: [String]) async throws -> String {
         let job = Task.detached(priority: .userInitiated) { try package(arguments: arguments) }
         return try await withTaskCancellationHandler { try await job.value } onCancel: { job.cancel() }
@@ -139,6 +175,13 @@ enum NativeMaterialPackage {
         }
         guard let weight = Float(value("--checkpoint-weight") ?? "1"), weight.isFinite else { throw StudioError("The selected adapter weight must be finite.") }
         let developer = arguments.contains("--developer-mode")
+        if configuration["schema"] as? String == NativeCompactMaterialModel.schema {
+            guard extras.isEmpty, weight == 1 else {
+                throw StudioError("A compact model is a complete standalone checkpoint; weighted LoRA combinations do not apply.")
+            }
+            return try addingSource(try publish(files: ["model.safetensors": selected.bytes], configuration: configuration,
+                                               output: URL(fileURLWithPath: output)), digest: selected.sha256)
+        }
         var adapter = selected
         if full {
             let partner = try NativeSafetensors(contentsOf: source.deletingLastPathComponent().appendingPathComponent("adapter.safetensors"))
@@ -199,6 +242,9 @@ enum NativeMaterialPackage {
             return decoded
         }
         var configuration = try adapterConfiguration(first.0)
+        guard configuration["schema"] as? String == "texture-studio-material-lora-v1" else {
+            throw StudioError("Weighted combinations require LoRA adapters; complete standalone models cannot be combined as adapters.")
+        }
         let specs = try layers(configuration)
         var decoded: [([String: NativeTensor], [String: NativeMaterialModel.AdapterLayer], Float)] = []
         for (snapshot, weight) in inputs {
@@ -257,11 +303,12 @@ enum NativeMaterialPackage {
         guard !fm.fileExists(atPath: output.path) else { throw StudioError("Choose a new model export directory.") }
         var files = supplied, configuration = configuration
         let full = files["model.safetensors"] != nil
+        let compact = configuration["schema"] as? String == NativeCompactMaterialModel.schema
         configuration["checkpoint_filename"] = full ? "model.safetensors" : "adapter.safetensors"
-        configuration["adapter_filename"] = "adapter.safetensors"
+        if !compact { configuration["adapter_filename"] = "adapter.safetensors" }
         configuration["full_checkpoint"] = full; configuration["optimizer_included"] = false; configuration["source_images_included"] = false
         files["config.json"] = try JSONSerialization.data(withJSONObject: configuration, options: [.prettyPrinted, .sortedKeys])
-        for name in licenses {
+        for name in compact ? compactLicenses : licenses {
             let source = Bundle.main.url(forResource: name, withExtension: nil, subdirectory: "ModelLicenses")
                 ?? Bundle.main.url(forResource: name, withExtension: nil)
                 ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Resources/ModelLicenses/" + name)
@@ -269,7 +316,8 @@ enum NativeMaterialPackage {
         }
         files["LICENSE"] = files["ModelLicenses/TextureStudio_LICENSE"]
         let modelName = (configuration["model_name"] as? String).map { "Model name: \($0)\n\n" } ?? ""
-        files["README.md"] = Data("---\nlicense: gpl-3.0\ntags:\n- texture-studio-material\n- material-maps\n- safetensors\n---\n\n# Texture Studio native material model\n\n\(modelName)Target: \(configuration["target"] ?? ""). Every training map uses its declared native grid without padding or resizing. The app evaluates this numeric checkpoint with Apple MPSGraph in Float32. Source images and an interpreter are not included. Original model notices are in ModelLicenses. Visual review is required before choosing a model.\n".utf8)
+        let familyDescription = compact ? "This compact model trains every weight from scratch and includes its complete standalone weights. No downloaded base or LoRA adapter is required." : "Original model notices are in ModelLicenses."
+        files["README.md"] = Data("---\nlicense: gpl-3.0\ntags:\n- texture-studio-material\n- material-maps\n- safetensors\n---\n\n# Texture Studio native material model\n\n\(modelName)Target: \(configuration["target"] ?? ""). Every training map uses its declared native grid without padding or resizing. The app evaluates this numeric checkpoint with Apple MPSGraph in Float32. \(familyDescription) Source images and an interpreter are not included. Visual review is required before choosing a model.\n".utf8)
         let size = files.values.reduce(Int64(0)) { $0 + Int64($1.count) }
         try fm.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
         let capacity = try output.deletingLastPathComponent().resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage
@@ -292,7 +340,8 @@ enum NativeMaterialPackage {
         try Task.checkCancellation()
         try fm.moveItem(at: stage, to: output)
         var result = try NativeMaterialTransfer.object(Data(NativeMaterialCheckpoint.inspect(at: output.appendingPathComponent(full ? "model.safetensors" : "adapter.safetensors")).utf8))
-        result["package_path"] = output.path; result["adapter_path"] = output.appendingPathComponent("adapter.safetensors").path
+        result["package_path"] = output.path
+        if !compact { result["adapter_path"] = output.appendingPathComponent("adapter.safetensors").path }
         return try NativeMaterialTransfer.json(result)
     }
     private static func metadata(_ configuration: [String: Any]) throws -> [String: String] { ["configuration": try NativeMaterialTransfer.json(configuration)] }

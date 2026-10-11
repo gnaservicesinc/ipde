@@ -16,9 +16,19 @@ enum NativeMaterialCommands {
             let job = Task.detached { try NativeMaterialCheckpoint.inspect(at: file, expectedSHA256: expected) }
             return try await withTaskCancellationHandler { try await job.value } onCancel: { job.cancel() }
         case "capabilities":
+            let family = value("--model-family") ?? "pbrnxt"
+            guard ["pbrnxt", "compact-scalar", "compact-normal"].contains(family) else { throw StudioError("Unsupported material model family.") }
             let scope = value("--scope") ?? "final-map"
-            guard ["final-map", "map-decoder"].contains(scope) else { throw StudioError("Unsupported material training scope.") }
-            return try NativeMaterialTransfer.json(["training_sizes": [256,512,1024,2048,4096], "inference_sizes": [256,512,1024,2048,4096,8192], "targets": ["height","roughness","normal"], "scope": scope, "image_size_matches_training_size": true, "hidden_encoder_resize": false, "memory_admission_enabled": true])
+            guard family != "pbrnxt" || ["final-map", "map-decoder"].contains(scope) else { throw StudioError("Unsupported material training scope.") }
+            let families: [[String: Any]] = [
+                ["id": "pbrnxt", "architecture": "pbrnxt-native-v1", "targets": ["height", "roughness", "normal"], "base_required": true, "training_policy": "lora"],
+                ["id": "compact-scalar", "architecture": "texture-studio-compact-scalar-native-v1", "targets": ["height", "roughness"], "base_required": false, "training_policy": "all_weights_from_scratch"],
+                ["id": "compact-normal", "architecture": "texture-studio-compact-normal-native-v1", "targets": ["normal"], "base_required": false, "training_policy": "all_weights_from_scratch"]]
+            let targets = family == "compact-scalar" ? ["height", "roughness"] : family == "compact-normal" ? ["normal"] : ["height", "roughness", "normal"]
+            return try NativeMaterialTransfer.json(["training_sizes": [256,512,1024,2048,4096], "inference_sizes": [256,512,1024,2048,4096,8192],
+                "targets": targets, "scope": family == "pbrnxt" ? scope : "full-model", "model_family": family, "model_families": families,
+                "base_required": family == "pbrnxt", "all_weights_trainable": family != "pbrnxt", "image_size_matches_training_size": true,
+                "hidden_encoder_resize": false, "memory_admission_enabled": true])
         case "hub-account": return try await NativeHuggingFaceService().accountJSON()
         case "hub-models": return try await NativeHuggingFaceService().modelsJSON()
         case "train", "refine", "infer": return try await NativeMaterialTrainer.run(arguments: arguments, onEvent: onEvent, control: control)

@@ -263,11 +263,24 @@ struct WorkbenchCheckpoint: Decodable, Identifiable, Sendable {
         case checkpointPath, sha256, schema, target, step, compatible, variant, refinementPolicy, architecture, scope, base, modelName
         case warmStartSupported = "supportsTrainingWarmStart"
     }
-    var supportsTrainingWarmStart: Bool { compatible && warmStartSupported == true }
-    var supportsStudioInference: Bool {
-        compatible && ["texture-studio-material-lora-v1", "texture-studio-material-checkpoint-v1"].contains(schema)
+    var modelFamily: MaterialTrainingModelFamily? {
+        if schema == "texture-studio-compact-material-v1" {
+            let family = MaterialTrainingModelFamily(architecture: architecture)
+            return family?.supports(target: target) == true ? family : nil
+        }
+        return ["texture-studio-material-lora-v1", "texture-studio-material-checkpoint-v1"].contains(schema) ? .pbrnxt : nil
     }
-    var availabilityLabel: String { variant == "full" ? "Full material checkpoint" : "Material LoRA" }
+    var supportsTrainingWarmStart: Bool { compatible && warmStartSupported == true && modelFamily != nil }
+    var supportsStudioInference: Bool {
+        compatible && modelFamily != nil
+    }
+    func matchesTraining(_ options: MaterialTrainingOptions) -> Bool {
+        guard modelFamily == options.modelFamily else { return false }
+        if options.modelFamily.isCompact { return target == options.target }
+        return schema != "texture-studio-material-lora-v1" ||
+            target == options.target && (scope ?? "final-map") == options.scope
+    }
+    var availabilityLabel: String { modelFamily?.isCompact == true ? "Full compact model" : variant == "full" ? "Full material checkpoint" : "Material LoRA" }
     var id: String { sha256 }
     var url: URL { URL(fileURLWithPath: checkpointPath) }
     var title: String {
@@ -290,8 +303,43 @@ enum MaterialTrainingIntervalUnit: String, Codable, CaseIterable, Hashable, Send
     var label: String { rawValue }
 }
 
+enum MaterialTrainingModelFamily: String, Codable, CaseIterable, Hashable, Sendable {
+    case pbrnxt
+    case compactScalar = "compact-scalar"
+    case compactNormal = "compact-normal"
+
+    var isCompact: Bool { self != .pbrnxt }
+    var label: String {
+        switch self {
+        case .pbrnxt: "PBRnxt refinement"
+        case .compactScalar: "Compact scalar"
+        case .compactNormal: "Compact normals"
+        }
+    }
+    var defaultLearningRate: Double { isCompact ? 0.001 : 0.00001 }
+    var architecture: String? {
+        switch self {
+        case .pbrnxt: nil
+        case .compactScalar: "texture-studio-compact-scalar-native-v1"
+        case .compactNormal: "texture-studio-compact-normal-native-v1"
+        }
+    }
+    init?(architecture: String?) {
+        guard let value = Self.allCases.first(where: { $0.isCompact && $0.architecture == architecture }) else { return nil }
+        self = value
+    }
+    func supports(target: String) -> Bool {
+        switch self {
+        case .pbrnxt: ["height", "roughness", "normal"].contains(target)
+        case .compactScalar: ["height", "roughness"].contains(target)
+        case .compactNormal: target == "normal"
+        }
+    }
+}
+
 struct MaterialTrainingOptions: Codable, Equatable, Sendable {
     var modelName = ""
+    var modelFamily: MaterialTrainingModelFamily = .pbrnxt
     var target = "height"
     var scope = "final-map"
     var size = 1024
@@ -321,7 +369,7 @@ struct MaterialTrainingOptions: Codable, Equatable, Sendable {
     init() {}
 
     enum CodingKeys: String, CodingKey {
-        case modelName, target, scope, size, updatesPerCrop, maxMinutes, useSelectedMaterialOnly, useWarmStart, loraRank, loraAlpha, validationEvery, checkpointEvery
+        case modelName, modelFamily, target, scope, size, updatesPerCrop, maxMinutes, useSelectedMaterialOnly, useWarmStart, loraRank, loraAlpha, validationEvery, checkpointEvery
         case validationUnit, checkpointUnit
         case learningRate, gradientAccumulationSteps, optimizer, optimizerBeta1, optimizerBeta2, optimizerEpsilon, weightDecay, maxGradientNorm, learningRateSchedule, minimumLearningRateRatio, warmupUpdates, seed
     }
@@ -330,6 +378,7 @@ struct MaterialTrainingOptions: Codable, Equatable, Sendable {
         self.init()
         let values = try decoder.container(keyedBy: CodingKeys.self)
         modelName = try values.decodeIfPresent(String.self, forKey: .modelName) ?? modelName
+        modelFamily = try values.decodeIfPresent(MaterialTrainingModelFamily.self, forKey: .modelFamily) ?? .pbrnxt
         target = try values.decodeIfPresent(String.self, forKey: .target) ?? target
         scope = try values.decodeIfPresent(String.self, forKey: .scope) ?? scope
         size = try values.decodeIfPresent(Int.self, forKey: .size) ?? size
@@ -339,7 +388,7 @@ struct MaterialTrainingOptions: Codable, Equatable, Sendable {
         useWarmStart = try values.decodeIfPresent(Bool.self, forKey: .useWarmStart) ?? useWarmStart
         loraRank = try values.decodeIfPresent(Int.self, forKey: .loraRank) ?? loraRank
         loraAlpha = try values.decodeIfPresent(Double.self, forKey: .loraAlpha) ?? loraAlpha
-        learningRate = try values.decodeIfPresent(Double.self, forKey: .learningRate) ?? learningRate
+        learningRate = try values.decodeIfPresent(Double.self, forKey: .learningRate) ?? modelFamily.defaultLearningRate
         gradientAccumulationSteps = try values.decodeIfPresent(Int.self, forKey: .gradientAccumulationSteps) ?? gradientAccumulationSteps
         optimizer = try values.decodeIfPresent(String.self, forKey: .optimizer) ?? optimizer
         optimizerBeta1 = try values.decodeIfPresent(Double.self, forKey: .optimizerBeta1) ?? optimizerBeta1
@@ -365,12 +414,13 @@ struct MaterialTrainingOptions: Codable, Equatable, Sendable {
     func restored(for resources: MachineResources) -> Self {
         var result = self
         if !["height", "roughness", "normal"].contains(result.target) { result.target = "height" }
-        if !["final-map", "map-decoder"].contains(result.scope) { result.scope = "final-map" }
+        if !result.modelFamily.supports(target: result.target) { result.target = result.modelFamily == .compactNormal ? "normal" : "height" }
+        if !["final-map", "map-decoder", "full-model"].contains(result.scope) || !result.modelFamily.isCompact && result.scope == "full-model" { result.scope = "final-map" }
         if ![256, 512, 1024, 2048].contains(result.size) { result.size = 1024 }
         result.loraRank = max(1, result.loraRank)
         result.loraAlpha = result.loraAlpha.isFinite && Float(result.loraAlpha).isFinite && Float(result.loraAlpha) > 0 ? result.loraAlpha : 8
         let defaults = Self()
-        if !result.learningRate.isFinite || Float(result.learningRate) <= 0 || !Float(result.learningRate).isFinite { result.learningRate = defaults.learningRate }
+        if !result.learningRate.isFinite || Float(result.learningRate) <= 0 || !Float(result.learningRate).isFinite { result.learningRate = result.modelFamily.defaultLearningRate }
         result.gradientAccumulationSteps = max(1, result.gradientAccumulationSteps)
         if !["adam", "adamw"].contains(result.optimizer) { result.optimizer = defaults.optimizer }
         if !result.optimizerBeta1.isFinite || result.optimizerBeta1 < 0 || !(0..<1).contains(Float(result.optimizerBeta1)) || result.optimizerBeta1 > 0 && Float(result.optimizerBeta1) == 0 { result.optimizerBeta1 = defaults.optimizerBeta1 }
@@ -388,10 +438,15 @@ struct MaterialTrainingOptions: Codable, Equatable, Sendable {
         return result
     }
 
+    var effectiveScope: String { modelFamily.isCompact ? "full-model" : scope }
+
     /// Both controls and the launcher reject values the Float32 trainer cannot represent.
     var configurationIssue: String? {
-        guard loraRank > 0 else { return "LoRA rank must be at least one." }
-        guard loraAlpha.isFinite, Float(loraAlpha).isFinite, Float(loraAlpha) > 0 else { return "LoRA alpha must be a positive finite Float32 value." }
+        guard modelFamily.supports(target: target) else { return "Choose a map supported by the selected model family." }
+        if !modelFamily.isCompact {
+            guard loraRank > 0 else { return "LoRA rank must be at least one." }
+            guard loraAlpha.isFinite, Float(loraAlpha).isFinite, Float(loraAlpha) > 0 else { return "LoRA alpha must be a positive finite Float32 value." }
+        }
         guard updatesPerCrop > 0 else { return "Updates per map must be at least one." }
         guard maxMinutes.isFinite, maxMinutes > 0 else { return "The training time limit must be a positive finite value." }
         guard validationEvery >= 0, checkpointEvery >= 0 else { return "Validation and checkpoint intervals cannot be negative." }

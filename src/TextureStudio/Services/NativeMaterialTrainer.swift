@@ -14,7 +14,7 @@ final class NativeMaterialTrainingControl: @unchecked Sendable {
 }
 
 /// Native whole-grid Float32 material training. MPSGraph differentiates the
-/// recorded LoRA factors; Swift owns averaging and Adam/AdamW updates, dataset
+/// recorded LoRA factors or compact model weights; Swift owns averaging and Adam/AdamW updates, dataset
 /// locks, iteration, validation and bit-preserving checkpoint publication.
 enum NativeMaterialTrainer {
     typealias Event = @Sendable (String) -> Void
@@ -29,6 +29,8 @@ enum NativeMaterialTrainer {
     }
     struct Options: Sendable {
         let command: String, target: String, scope: String
+        let modelFamily: MaterialTrainingModelFamily
+        let compactWidth: Int
         let modelName: String?
         let dataset: URL?, output: URL, image: URL?, checkpoint: URL?, expectedSHA256: String?, base: URL
         let size: Int, rank: Int, updatesPerMap: Int, validationEvery: Int, checkpointEvery: Int
@@ -45,25 +47,43 @@ enum NativeMaterialTrainer {
             func url(_ flag: String) -> URL? { value(flag).map { URL(fileURLWithPath: $0).standardizedFileURL } }
             guard let output = url("--output") else { throw StudioError("Choose a new material operation output folder.") }
             self.output = output; dataset = url("--dataset"); image = url("--image"); checkpoint = url("--checkpoint")
-            expectedSHA256 = value("--expected-sha256")
+            let requestedSHA256 = value("--expected-sha256")
             var recorded: [String: Any] = [:]
             if let checkpoint {
-                let snapshot = try NativeSafetensors(contentsOf: NativeMaterialModel.resolvedCheckpoint(checkpoint), expectedSHA256: expectedSHA256)
+                let snapshot = try NativeSafetensors(contentsOf: NativeMaterialModel.resolvedCheckpoint(checkpoint), expectedSHA256: requestedSHA256)
+                expectedSHA256 = snapshot.sha256
                 if let text = snapshot.metadata["configuration"] { recorded = (try JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:] }
-            }
+            } else { expectedSHA256 = requestedSHA256 }
             let requestedName = (value("--model-name") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let recordedName = (recorded["model_name"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let name = requestedName.isEmpty ? recordedName : requestedName
             modelName = name.isEmpty ? nil : name
             target = value("--target") ?? recorded["target"] as? String ?? "height"
-            scope = value("--scope") ?? recorded["scope"] as? String ?? "final-map"
-            guard ["height", "roughness", "normal"].contains(target), ["final-map", "map-decoder"].contains(scope) else { throw StudioError("Choose a supported material target and layer scope.") }
+            let recordedArchitecture = recorded["architecture"] as? String
+            let recordedFamily: String? = recorded["model_family"] as? String ??
+                (recordedArchitecture == "texture-studio-compact-scalar-native-v1" ? "compact-scalar" :
+                 recordedArchitecture == "texture-studio-compact-normal-native-v1" ? "compact-normal" : nil)
+            guard let family = MaterialTrainingModelFamily(rawValue: value("--model-family") ?? recordedFamily ?? "pbrnxt") else {
+                throw StudioError("Choose a supported native material model family.")
+            }
+            modelFamily = family
+            if let recordedFamily, recordedFamily != family.rawValue {
+                throw StudioError("The selected checkpoint belongs to a different material model family.")
+            }
+            scope = value("--scope") ?? recorded["scope"] as? String ?? (family == .pbrnxt ? "final-map" : "full-model")
+            guard ["height", "roughness", "normal"].contains(target),
+                  family == .pbrnxt ? ["final-map", "map-decoder"].contains(scope) : scope == "full-model",
+                  family == .pbrnxt || (family.rawValue == "compact-normal" ? target == "normal" : target != "normal") else {
+                throw StudioError("Choose a compatible material map and training scope for this model family.")
+            }
+            compactWidth = Int(value("--compact-width") ?? String(recorded["network_width"] as? Int ?? 32)) ?? 0
+            guard family == .pbrnxt || [16, 32].contains(compactWidth) else { throw StudioError("Compact model width must be 16 or 32.") }
             let directory = url("--model-directory") ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Texture Studio/Material Models/pbrnxt-base")
             base = url("--base-checkpoint") ?? NativeMaterialPackage.baseURL(directory, configuration: recorded)
-            size = Int(value("--size") ?? "1024") ?? 0
+            size = Int(value("--size") ?? (family == .pbrnxt ? "1024" : "512")) ?? 0
             rank = Int(value("--lora-rank") ?? "8") ?? 0
             alpha = Float(value("--lora-alpha") ?? "8") ?? .nan
-            learningRate = Float(value("--learning-rate") ?? "0.00001") ?? .nan
+            learningRate = Float(value("--learning-rate") ?? (family == .pbrnxt ? "0.00001" : "0.001")) ?? .nan
             gradientAccumulationSteps = Int(value("--gradient-accumulation-steps") ?? "1") ?? 0
             warmupUpdates = Int(value("--warmup-updates") ?? "0") ?? -1
             learningRateSchedule = value("--learning-rate-schedule") ?? "constant"
@@ -89,12 +109,14 @@ enum NativeMaterialTrainer {
                 throw StudioError("Validation and checkpoint intervals must use epoch or step.")
             }
             self.validationUnit = validationUnit; self.checkpointUnit = checkpointUnit
-            guard let parsedSeed = UInt64(value("--seed") ?? "17") else { throw StudioError("The training seed must be a nonnegative 64-bit integer.") }
+            let recordedSeed = recorded["initialization_seed"].map { String(describing: $0) } ?? "17"
+            guard let parsedSeed = UInt64(value("--seed") ?? recordedSeed) else { throw StudioError("The training seed must be a nonnegative 64-bit integer.") }
             seed = parsedSeed
             materials = arguments.indices.filter { arguments[$0] == "--material" && arguments.indices.contains($0 + 1) }.map { arguments[$0 + 1] }
             inputEncoding = value("--input-encoding") ?? "srgb"
             baseline = arguments.contains("--baseline"); developerMode = arguments.contains("--developer-mode")
-            guard size >= 256, size <= 8192, size % 64 == 0, rank > 0, alpha.isFinite, alpha > 0,
+            guard size >= 256, size <= 8192, size % 64 == 0,
+                  family != .pbrnxt || (rank > 0 && alpha.isFinite && alpha > 0),
                   learningRate.isFinite, learningRate > 0, updatesPerMap > 0, maxMinutes.isFinite, maxMinutes > 0,
                   validationEvery >= 0, checkpointEvery >= 0 else { throw StudioError("Material training sizes, rates and update counts are invalid.") }
             guard gradientAccumulationSteps > 0, warmupUpdates >= 0, optimizerConfiguration.isValid,
@@ -123,6 +145,7 @@ enum NativeMaterialTrainer {
                 "minimum_learning_rate": max(Float.leastNonzeroMagnitude, learningRate * minimumLearningRateRatio),
                 "warmup_updates": warmupUpdates, "seed": seed, "precision": "Float32",
                 "value_loss_weight": 1, "detail_loss_weight": 4,
+                "model_family": modelFamily.rawValue, "trainable_parameters": modelFamily == .pbrnxt ? "LoRA factors" : "complete compact network",
                 "optimizer_state_restored": false,
                 "validation_every": validationEvery, "validation_unit": validationUnit.rawValue,
                 "checkpoint_every": checkpointEvery, "checkpoint_unit": checkpointUnit.rawValue,
@@ -136,8 +159,7 @@ enum NativeMaterialTrainer {
         let imageURL = options.image!, snapshot = try Data(contentsOf: imageURL)
         let photo = try NativePNG.decode(snapshot)
         let rgb = try photo.modelFloatSamples(role: "input", encoding: options.inputEncoding)
-        let model = try NativeMaterialModel.load(checkpointURL: options.baseline ? nil : options.checkpoint,
-            expectedSHA256: options.expectedSHA256, baseURL: options.base, target: options.target, scope: options.scope)
+        let model = try NativeTrainableMaterialModel.load(options, training: false)
         let prediction = try model.predict(rgb: rgb, width: photo.header.width, height: photo.header.height, target: options.target)
         try control.check()
         guard try checksum(Data(contentsOf: imageURL)) == checksum(snapshot) else { throw StudioError("The prepared diffuse changed during inference.") }
@@ -149,9 +171,14 @@ enum NativeMaterialTrainer {
         try NativeMaterialNumericExporter.writeEXR(prediction, to: stage.appendingPathComponent(filename))
         let digest = try checksum(Data(contentsOf: stage.appendingPathComponent(filename)))
         let checkpointHash = try options.checkpoint.map { checksum(try Data(contentsOf: NativeMaterialModel.resolvedCheckpoint($0))) }
+        guard checkpointHash == nil || checkpointHash == options.expectedSHA256 else {
+            throw StudioError("The selected checkpoint changed during inference. Choose the model again.")
+        }
         let result: [String: Any] = ["checkpoint_sha256": checkpointHash ?? model.baseSHA256,
             "checkpoint_step": options.baseline ? 0 : model.configuration["step"] ?? 0,
             "target": options.target, "input_kind": "diffuse", "diffuse_path": imageURL.path,
+            "model_family": options.modelFamily.rawValue, "architecture": model.configuration["architecture"] ?? "pbrnxt-native-v1",
+            "output_channels": prediction.channels, "untrained_initialization": options.modelFamily != .pbrnxt && options.baseline,
             "image_sha256": checksum(snapshot), "native_dimensions": [prediction.width, prediction.height],
             "source_bits": photo.header.bits, "source_bytes_modified": false,
             "generation": ["tiled": false, "model_input_dimensions": [prediction.width, prediction.height],
@@ -163,6 +190,7 @@ enum NativeMaterialTrainer {
         return try json(result)
     }
     static func train(_ options: Options, onEvent: Event, control: NativeMaterialTrainingControl, model suppliedModel: NativeMaterialModel? = nil,
+                      compactModel suppliedCompactModel: NativeCompactMaterialModel? = nil,
                       now: @Sendable () -> ContinuousClock.Instant = { .now }) throws -> String {
         let activity = ProcessInfo.processInfo.beginActivity(options: .userInitiated, reason: "Training the requested material model")
         defer { ProcessInfo.processInfo.endActivity(activity) }
@@ -204,8 +232,10 @@ enum NativeMaterialTrainer {
             throw StudioError("The prepared dataset changed before native training obtained its read locks.")
         }
         try setup("Loading material model", step: 2, requested: requestedUpdates, maps: training.count)
-        let model = try suppliedModel ?? NativeMaterialModel.load(checkpointURL: options.checkpoint, expectedSHA256: options.expectedSHA256,
-            baseURL: options.base, target: options.target, scope: options.scope, rank: options.rank, alpha: options.alpha, training: true, seed: options.seed)
+        let model: NativeTrainableMaterialModel
+        if let suppliedModel { model = .init(suppliedModel) }
+        else if let suppliedCompactModel { model = .init(suppliedCompactModel) }
+        else { model = try NativeTrainableMaterialModel.load(options, training: true) }
         if let name = options.modelName { model.configuration["model_name"] = name }
         var effectiveConfiguration = options.trainingConfiguration
         effectiveConfiguration["training_size"] = options.size
@@ -224,9 +254,11 @@ enum NativeMaterialTrainer {
         effectiveConfiguration["quick_validation_count"] = quickCount
         effectiveConfiguration["initial_step"] = model.configuration["step"] as? Int ?? 0
         effectiveConfiguration["scheduling_step_origin"] = "current_run"
-        effectiveConfiguration["lora_layers"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(model.layers))
+        if !model.isCompact { effectiveConfiguration["lora_layers"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(model.layers)) }
+        effectiveConfiguration["trainable_parameter_count"] = model.parameterCount
+        effectiveConfiguration["output_channels"] = options.target == "normal" ? 3 : 1
         model.configuration["training_configuration"] = effectiveConfiguration
-        try admitTraining(model: model, size: options.size)
+        try model.prepareTraining(size: options.size)
         try setup("Preparing model execution graph", step: 3)
         let program = try model.program(width: options.size, height: options.size, target: options.target)
         try control.check()
@@ -319,7 +351,7 @@ enum NativeMaterialTrainer {
                 let mae: Double? = try autoreleasepool {
                     guard let data = try availablePair(sample, phase: "validation") else { return nil }
                     do {
-                        let result = try program.execute(rgb: data.0, adapters: model.adapterWeights, reference: data.1,
+                        let result = try program.execute(rgb: data.0, weights: model.trainableWeights, reference: data.1,
                         featureKey: sample.inputSHA256 + ":" + sample.inputEncoding, checkCancellation: { try control.check() }, onStage: { done, total in
                             if done == 1 || done % 10 == 0 || done == total {
                                 try? emit(["event": "feature_progress", "phase": "validation", "sample_id": sample.id, "completed": done, "total": total])
@@ -359,7 +391,7 @@ enum NativeMaterialTrainer {
             let configText = try json(config)
             let destination = options.output.appendingPathComponent(String(format: "checkpoint-step-%08d.safetensors", initialStep + completed))
             try control.check()
-            try NativeSafetensors.write(tensors: model.adapterWeights, metadata: ["configuration": configText], to: destination)
+            try NativeSafetensors.write(tensors: model.trainableWeights, metadata: ["configuration": configText], to: destination)
             var information = try JSONSerialization.jsonObject(with: Data(NativeMaterialCheckpoint.inspect(at: destination).utf8)) as! [String: Any]
             checkpoints.append(information)
             information["event"] = "checkpoint_saved"; information["validation"] = lastValidation
@@ -369,7 +401,8 @@ enum NativeMaterialTrainer {
         }
         do {
             try emit(["event": "training_started", "runtime": "Apple MPSGraph", "precision": "Float32", "training_size": options.size,
-                "execution": "bounded-native-stages-v1", "stage_count": program.frozenStageCount,
+                "execution": model.isCompact ? "compact-native-full-network-v1" : "bounded-native-stages-v1", "stage_count": program.frozenStageCount,
+                "model_family": options.modelFamily.rawValue, "trainable_parameter_count": model.parameterCount,
                 "requested_updates": requestedUpdates, "updates_per_map": options.updatesPerMap,
                 "training_map_count": training.count, "validation_map_count": validation.count,
                 "training_configuration": effectiveConfiguration,
@@ -413,7 +446,7 @@ enum NativeMaterialTrainer {
                             let loadingStarted = ProcessInfo.processInfo.systemUptime
                             guard let data = try availablePair(accumulatedSample, phase: "training") else { return nil }
                             dataPreparationSeconds += ProcessInfo.processInfo.systemUptime - loadingStarted
-                            do { return try program.execute(rgb: data.0, adapters: model.adapterWeights, reference: data.1,
+                            do { return try program.execute(rgb: data.0, weights: model.trainableWeights, reference: data.1,
                             gradientsOnly: true,
                             featureKey: accumulatedSample.inputSHA256 + ":" + accumulatedSample.inputEncoding, checkCancellation: { try control.check() }, onStage: { done, total in
                                 if done == 1 || done % 10 == 0 || done == total {
@@ -463,7 +496,7 @@ enum NativeMaterialTrainer {
                     let optimizerStarted = ProcessInfo.processInfo.systemUptime
                     let update: NativeMaterialOptimizer.Update
                     do {
-                        update = try NativeMaterialOptimizer.apply(gradients: accumulated.averaged(), weights: model.adapterWeights,
+                        update = try NativeMaterialOptimizer.apply(gradients: accumulated.averaged(), weights: model.trainableWeights,
                             state: optimizer, learningRate: rate, step: completed + 1, configuration: options.optimizerConfiguration)
                     } catch let error as NativeMaterialSampleError {
                         for sample in evaluatedSamples { try quarantine(sample, phase: "training", error: error) }
@@ -474,7 +507,7 @@ enum NativeMaterialTrainer {
                     }
                     let optimizerSeconds = ProcessInfo.processInfo.systemUptime - optimizerStarted
                     try control.check()
-                    model.updateAdapters(update.weights); optimizer = update.state
+                    try model.updateWeights(update.weights); optimizer = update.state
                     try emit(["event": "operation_progress", "phase": "training", "operation": "Applying optimizer update", "completed": 1, "total": 1])
                     completed += 1
                     activeUpdate = false
@@ -525,11 +558,12 @@ enum NativeMaterialTrainer {
             // child before export: cancellation can occur after publication
             // while the exporter inspects its completed package.
             ownedExport = export
-            _ = try NativeMaterialPackage.export(model: model, configuration: configuration, to: export, developer: options.developerMode)
+            _ = try model.export(configuration: configuration, to: export, developer: options.developerMode)
             try control.check()
             let reason = stoppedReason()
             var result: [String: Any] = ["status": reason == nil ? "completed" : "stopped",
-                "checkpoint_path": export.appendingPathComponent(options.developerMode ? "model.safetensors" : "adapter.safetensors").path,
+                "checkpoint_path": export.appendingPathComponent(model.isCompact || options.developerMode ? "model.safetensors" : "adapter.safetensors").path,
+                "model_family": options.modelFamily.rawValue, "output_channels": options.target == "normal" ? 3 : 1,
                 "package_path": export.path, "completed_updates": completed, "training_performed": completed > 0,
                 "requested_updates": requestedUpdates, "updates_per_map": options.updatesPerMap,
                 "training_configuration": effectiveConfiguration, "sample_evaluations": sampleEvaluations,

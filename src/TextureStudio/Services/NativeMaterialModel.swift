@@ -104,6 +104,10 @@ final class NativeMaterialModel: @unchecked Sendable {
             _ = try NativeMaterialCheckpoint.inspect(at: checkpointURL, expectedSHA256: expectedSHA256)
             let checkpoint = try NativeSafetensors(contentsOf: resolvedCheckpoint(checkpointURL), expectedSHA256: expectedSHA256)
             configuration = try JSONSerialization.jsonObject(with: Data(checkpoint.metadata["configuration"]!.utf8)) as! [String: Any]
+            guard ["texture-studio-material-checkpoint-v1", "texture-studio-material-lora-v1"].contains(configuration["schema"] as? String ?? ""),
+                  configuration["architecture"] as? String == "pbrnxt-native-v1" else {
+                throw StudioError("This checkpoint uses a different material model family. Choose its recorded family.")
+            }
             guard configuration["target"] as? String == target,
                   !training || configuration["schema"] as? String != "texture-studio-material-lora-v1" || configuration["scope"] as? String == scope else {
                 throw StudioError("The selected checkpoint target or trained layer scope differs from this operation.")

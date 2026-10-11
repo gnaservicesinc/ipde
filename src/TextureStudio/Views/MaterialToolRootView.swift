@@ -201,7 +201,7 @@ struct MaterialToolRootView: View {
                     }
                 }.padding(.horizontal)
             }.disabled(store.isBusy)
-            Toggle("Include the material base before refinement", isOn: $store.comparisonIncludesBase)
+            Toggle(store.comparisonBaselineLabel, isOn: $store.comparisonIncludesBase)
                 .toggleStyle(.checkbox).disabled(store.isBusy).padding(.horizontal).padding(.vertical, 8)
             if let issue = store.comparisonConfigurationIssue, !store.isBusy {
                 Text(issue)
